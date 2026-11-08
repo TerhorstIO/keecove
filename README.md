@@ -4,10 +4,10 @@ Browserbasierter Passwortmanager für KeePass-Dateien. Docker liefert die Web-Ap
 
 ## Deployment mit Docker
 
-Lade die [Compose-Datei](https://raw.githubusercontent.com/TerhorstIO/keevault/main/compose.yaml) in ein leeres Verzeichnis. Sie nutzt `ghcr.io/terhorstio/keevault:latest` für Linux auf AMD64 und ARM64.
+Lade die [Compose-Datei](https://raw.githubusercontent.com/TerhorstIO/keecove/main/compose.yaml) in ein leeres Verzeichnis. Sie nutzt `ghcr.io/terhorstio/keevault:latest` für Linux auf AMD64 und ARM64.
 
 ```sh
-curl -fsSLo compose.yaml https://raw.githubusercontent.com/TerhorstIO/keevault/main/compose.yaml
+curl -fsSLo compose.yaml https://raw.githubusercontent.com/TerhorstIO/keecove/main/compose.yaml
 ```
 
 Trage deine Einstellungen direkt in `compose.yaml` unter `services.keevault.environment` ein. Die Vorgaben starten KeeCove lokal auf Port 8080. Wenn du den Port änderst, passe `PORT` und beide Portnummern unter `ports` gemeinsam an. Unter Linux muss `user` zur UID und GID des Besitzers des TLS-Verzeichnisses passen.
@@ -15,7 +15,7 @@ Trage deine Einstellungen direkt in `compose.yaml` unter `services.keevault.envi
 Der Container liest `localhost.crt` und `localhost.key` aus dem schreibgeschützt eingebundenen TLS-Verzeichnis. Falls du noch kein Zertifikat hast, kannst du es einmalig mit Node.js und OpenSSL 3 erzeugen. Unter Windows verwendet das Skript auch OpenSSL aus Git for Windows. Verwende in Windows PowerShell für die Downloads `curl.exe`.
 
 ```sh
-curl -fsSLo create-local-cert.mjs https://raw.githubusercontent.com/TerhorstIO/keevault/main/scripts/create-local-cert.mjs
+curl -fsSLo create-local-cert.mjs https://raw.githubusercontent.com/TerhorstIO/keecove/main/scripts/create-local-cert.mjs
 node create-local-cert.mjs
 ```
 
@@ -29,9 +29,9 @@ docker compose up -d --pull always --wait
 
 ### Docker-Image offline importieren
 
-Ein erfolgreicher [Docker-Build](https://github.com/TerhorstIO/keevault/actions/workflows/docker.yml) auf `main` aktualisiert das Image `:latest` und veröffentlicht einen Vorab-Release für den Commit. Ein Git-Tag wie `v0.1.0` erzeugt einen Versionsrelease mit dem gleichnamigen Image-Tag.
+Ein erfolgreicher [Docker-Build](https://github.com/TerhorstIO/keecove/actions/workflows/docker.yml) auf `main` aktualisiert das Image `:latest` und veröffentlicht einen Vorab-Release für den Commit. Ein Git-Tag wie `v0.1.0` erzeugt einen Versionsrelease mit dem gleichnamigen Image-Tag.
 
-Lade in den [GitHub-Releases](https://github.com/TerhorstIO/keevault/releases) das Archiv für den Zielrechner herunter. Für x86-64 heißt es `keecove-linux-amd64.tar`, für ARM64 `keecove-linux-arm64.tar`. Die Prüfsummen stehen in `SHA256SUMS`. Kopiere die Compose-Datei auf den Zielrechner und stelle dort die TLS-Dateien wie oben bereit.
+Lade in den [GitHub-Releases](https://github.com/TerhorstIO/keecove/releases) das Archiv für den Zielrechner herunter. Für x86-64 heißt es `keecove-linux-amd64.tar`, für ARM64 `keecove-linux-arm64.tar`. Die Prüfsummen stehen in `SHA256SUMS`. Kopiere die Compose-Datei auf den Zielrechner und stelle dort die TLS-Dateien wie oben bereit.
 
 ```sh
 docker load -i keecove-linux-amd64.tar

@@ -10,6 +10,9 @@ on:
 permissions:
   contents: read
 
+env:
+  IMAGE: ghcr.io/terhorstio/keevault
+
 concurrency:
   group: docker-${{ github.ref }}
   cancel-in-progress: false
@@ -35,7 +38,8 @@ jobs:
 
   publish:
     name: Publish image
-    if: github.event_name == 'push' && github.repository == 'terhorstio/keevault'
+    # Repository ID stays stable if TerhorstIO/keecove is renamed.
+    if: github.event_name == 'push' && github.repository_id == '1450719010'
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -61,7 +65,7 @@ jobs:
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: metadata
         with:
-          images: ghcr.io/terhorstio/keevault
+          images: ${{ env.IMAGE }}
           flavor: latest=false
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
@@ -78,7 +82,7 @@ jobs:
 
   release:
     name: Publish offline archives
-    if: github.event_name == 'push' && github.repository == 'terhorstio/keevault'
+    if: github.event_name == 'push' && github.repository_id == '1450719010'
     needs: publish
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -86,7 +90,6 @@ jobs:
       contents: write
       packages: read
     env:
-      IMAGE: ghcr.io/terhorstio/keevault
       IMAGE_TAG: ${{ needs.publish.outputs.image_tag }}
       DIGEST: ${{ needs.publish.outputs.digest }}
     steps:
