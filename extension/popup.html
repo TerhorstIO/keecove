@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Keevault</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="popup.js"></script>
+</head>
+<body class="popup">
+  <main>
+    <header>
+      <span class="eyebrow">Keevault</span>
+      <h1>Anmeldedaten</h1>
+      <p id="target" class="target" hidden></p>
+    </header>
+    <p id="status" role="status">Verbindung wird geprüft …</p>
+    <ul id="accounts" aria-label="Passende KeePass-Einträge"></ul>
+    <footer>
+      <button id="open-vault" type="button" hidden>Vault öffnen</button>
+      <button id="settings" type="button">Einstellungen</button>
+    </footer>
+  </main>
+</body>
+</html>

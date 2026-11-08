@@ -1,0 +1,29 @@
+{
+  "name": "keevault",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.15.0"
+  },
+  "scripts": {
+    "build": "vite build && node scripts/package-extension.mjs",
+    "start": "node server/index.mjs",
+    "tls:cert": "node --env-file-if-exists=.env scripts/create-local-cert.mjs",
+    "test": "node --test",
+    "dev": "npm run build && npm start"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.4.0",
+    "hash-wasm": "4.13.0",
+    "kdbxweb": "2.1.1"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "6.2.8",
+    "fflate": "0.8.3",
+    "vite": "8.3.6"
+  },
+  "overrides": {
+    "@xmldom/xmldom": "^0.8.0"
+  }
+}

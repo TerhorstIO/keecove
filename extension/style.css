@@ -1,0 +1,45 @@
+:root {
+  color-scheme: light dark;
+  font: 14px/1.45 system-ui, sans-serif;
+  background: Canvas;
+  color: CanvasText;
+  --border: GrayText;
+  --muted: GrayText;
+  --accent: #007a65;
+}
+
+@supports (color: color-mix(in srgb, white, black)) {
+  :root {
+    --border: color-mix(in srgb, CanvasText 22%, Canvas);
+    --muted: color-mix(in srgb, CanvasText 72%, Canvas);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root { --accent: #6ee7c6; }
+}
+
+body { margin: 0; }
+.popup { width: 326px; }
+main { padding: 18px; }
+.settings main { max-width: 32rem; margin: 8vh auto; }
+header { margin-bottom: 14px; }
+h1 { margin: 2px 0 0; font-size: 1.4rem; }
+p { margin: 8px 0; }
+.eyebrow { color: var(--accent); font-size: .82rem; font-weight: 700; }
+.target { color: var(--muted); overflow-wrap: anywhere; }
+ul { padding: 0; margin: 12px 0; list-style: none; max-height: 260px; overflow-y: auto; }
+li + li { margin-top: 6px; }
+button, input { font: inherit; color: inherit; }
+button { padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: Canvas; }
+button:enabled { cursor: pointer; }
+button:enabled:hover { border-color: var(--accent); }
+button:disabled { opacity: .65; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.account { width: 100%; text-align: left; overflow-wrap: anywhere; }
+.account small { display: block; color: var(--muted); }
+footer { display: flex; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+label { display: block; font-weight: 600; margin: 14px 0 5px; }
+input { box-sizing: border-box; width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+#url-help { color: var(--muted); }
+.primary { margin-top: 6px; border-color: var(--accent); font-weight: 600; }

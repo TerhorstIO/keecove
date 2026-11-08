@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+/data/
+*.kdb
+*.kdbx
+*.kdbx.*
+*.key
+*.keyx
+*.pem
+*.p12
+*.pfx
+.keevault-*.partial

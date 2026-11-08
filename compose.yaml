@@ -1,0 +1,44 @@
+services:
+  keevault:
+    build: .
+    image: "${KEEVAULT_IMAGE:-keevault:local}"
+    init: true
+    restart: unless-stopped
+    user: "${KEEVAULT_UID:-1000}:${KEEVAULT_GID:-1000}"
+    ports:
+      - "127.0.0.1:${KEEVAULT_PORT:-8080}:${KEEVAULT_PORT:-8080}"
+    environment:
+      PORT: "${KEEVAULT_PORT:-8080}"
+      TLS_CERT_PATH: /tls/localhost.crt
+      TLS_KEY_PATH: /tls/localhost.key
+      PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-}"
+      VAULT_HTTP_USER: "${VAULT_HTTP_USER:-}"
+      VAULT_HTTP_PASSWORD: "${VAULT_HTTP_PASSWORD:-}"
+      CLOUD_ONEDRIVE_CLIENT_ID: "${CLOUD_ONEDRIVE_CLIENT_ID:-}"
+      CLOUD_ONEDRIVE_TENANT: "${CLOUD_ONEDRIVE_TENANT:-common}"
+      CLOUD_GOOGLE_CLIENT_ID: "${CLOUD_GOOGLE_CLIENT_ID:-}"
+      CLOUD_DROPBOX_CLIENT_ID: "${CLOUD_DROPBOX_CLIENT_ID:-}"
+    volumes:
+      - type: bind
+        source: "${KEEVAULT_TLS_DIR:-${LOCALAPPDATA:-${HOME}}/.keevault/tls}"
+        target: /tls
+        read_only: true
+        bind:
+          create_host_path: false
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >
+          const ca = require('node:fs').readFileSync(process.env.TLS_CERT_PATH);
+          require('node:https').get({ hostname: '127.0.0.1', port: process.env.PORT, path: '/healthz', ca }, response => {
+            response.resume();
+            process.exitCode = response.statusCode === 204 ? 0 : 1;
+          }).on('error', () => { process.exitCode = 1; });
+      interval: 30s
+      timeout: 5s
+      retries: 3
