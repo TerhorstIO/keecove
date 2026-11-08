@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: docker-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -42,6 +42,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      image_tag: ${{ steps.metadata.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -65,9 +68,69 @@ jobs:
             type=ref,event=tag
             type=sha,format=long
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        id: build
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
+
+  release:
+    name: Publish offline archives
+    if: github.event_name == 'push' && github.repository == 'terhorstio/keevault'
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      packages: read
+    env:
+      IMAGE: ghcr.io/terhorstio/keevault
+      IMAGE_TAG: ${{ needs.publish.outputs.image_tag }}
+      DIGEST: ${{ needs.publish.outputs.digest }}
+    steps:
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Export Docker images
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: |
+          [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]
+
+          for arch in amd64 arm64; do
+            docker pull --platform "linux/$arch" "$IMAGE@$DIGEST"
+            docker image tag "$IMAGE@$DIGEST" "$IMAGE:$IMAGE_TAG"
+            docker image save --platform "linux/$arch" \
+              --output "keecove-linux-$arch.tar" "$IMAGE:$IMAGE_TAG"
+          done
+          sha256sum keecove-linux-amd64.tar keecove-linux-arm64.tar > SHA256SUMS
+      - name: Upload archives to GitHub Releases
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            release_tag="$GITHUB_REF_NAME"
+            release_flags=(--verify-tag)
+          else
+            release_tag="build-$GITHUB_SHA"
+            release_flags=(--target "$GITHUB_SHA" --prerelease --latest=false)
+          fi
+          assets=(keecove-linux-amd64.tar keecove-linux-arm64.tar SHA256SUMS)
+
+          if is_draft=$(gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null); then
+            gh release upload "$release_tag" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            if [[ "$is_draft" == true ]]; then
+              gh release edit "$release_tag" --draft=false --repo "$GITHUB_REPOSITORY"
+            fi
+          else
+            gh release create "$release_tag" "${assets[@]}" "${release_flags[@]}" \
+              --repo "$GITHUB_REPOSITORY" --title "KeeCove $release_tag" \
+              --notes "Offline Docker archives for $IMAGE:$IMAGE_TAG."
+          fi

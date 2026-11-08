@@ -9,7 +9,7 @@
   "scripts": {
     "build": "vite build && node scripts/package-extension.mjs",
     "start": "node server/index.mjs",
-    "tls:cert": "node --env-file-if-exists=.env scripts/create-local-cert.mjs",
+    "tls:cert": "node scripts/create-local-cert.mjs",
     "test": "node --test",
     "dev": "npm run build && npm start"
   },
