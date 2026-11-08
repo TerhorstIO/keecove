@@ -102,7 +102,7 @@ async function load() {
   const settings = await chrome.storage.local.get('vaultUrl');
   const vault = vaultAddress(settings.vaultUrl);
   if (!vault) {
-    status.textContent = 'Keevault-Adresse fehlt.';
+    status.textContent = 'KeeCove-Adresse fehlt.';
     return;
   }
 
@@ -148,7 +148,7 @@ async function load() {
 
   const vaultTabs = await findVaultTabs(vault, incognito);
   if (!vaultTabs.length) {
-    status.textContent = 'Öffne und entsperre zuerst den Keevault im selben Browserprofil.';
+    status.textContent = 'Öffne und entsperre KeeCove zuerst im selben Browserprofil.';
     return;
   }
 
@@ -164,8 +164,8 @@ async function load() {
     return;
   }
   status.textContent = locked
-    ? 'Entsperre den Keevault und öffne die Erweiterung erneut.'
-    : 'Der Vault antwortet gerade nicht. Prüfe die Adresse und den Status im Keevault.';
+    ? 'Entsperre KeeCove und öffne die Erweiterung erneut.'
+    : 'Der Vault antwortet gerade nicht. Prüfe die Adresse und den Status in KeeCove.';
 }
 
 load().catch(() => {

@@ -129,6 +129,7 @@ async function sendFile(request, response, path, staticRoot) {
         throw new HttpError(400, 'Invalid path.');
     }
     if (pathname === '/') pathname = '/index.html';
+    if (pathname === '/keevault-browser.zip') pathname = '/keecove-browser.zip';
     if (/[\\:\0]/.test(pathname) || pathname.split('/').some((segment) => segment.startsWith('.'))) {
         throw new HttpError(404, 'Not found.');
     }
@@ -158,8 +159,8 @@ function sendError(request, response, error) {
         return;
     }
     const status = error instanceof HttpError ? error.status : 500;
-    const message = status === 500 ? 'Keevault could not access the file.' : error.message;
-    if (status === 500) console.error('Keevault request failed.', error.code ?? error.name);
+    const message = status === 500 ? 'KeeCove could not access the file.' : error.message;
+    if (status === 500) console.error('KeeCove request failed.', error.code ?? error.name);
     const body = JSON.stringify({ error: message });
     response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
     response.end(request.method === 'HEAD' ? undefined : body);
@@ -200,7 +201,7 @@ export async function createVaultServer(config = readConfig()) {
         }
 
         const origin = expectedOrigin(request.headers.host?.toLowerCase(), server.address()?.port, config.origin, Boolean(config.tls));
-        if (!origin) throw new HttpError(421, 'Host is not configured for Keevault.');
+        if (!origin) throw new HttpError(421, 'Host is not configured for KeeCove.');
         if (!allowedUser(request.headers.authorization, config.auth)) {
             response.setHeader('WWW-Authenticate', 'Basic realm="Keevault", charset="UTF-8"');
             throw new HttpError(401, 'Authentication required.');

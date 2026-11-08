@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Keevault",
-  "description": "Füllt Anmeldedaten aus deinem entsperrten Keevault aus.",
+  "name": "KeeCove",
+  "description": "Füllt Anmeldeformulare mit Zugangsdaten aus deinem entsperrten KeeCove-Tresor.",
   "version": "0.1.0",
   "minimum_chrome_version": "106",
   "permissions": ["activeTab", "scripting", "storage"],
   "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
   "action": {
-    "default_title": "Keevault",
+    "default_title": "KeeCove",
     "default_popup": "popup.html"
   },
   "options_ui": {

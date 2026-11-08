@@ -15,4 +15,4 @@ async function collect(directory, prefix = '') {
 
 await collect(root);
 if (!files['manifest.json']) throw new Error('Extension manifest is missing.');
-await writeFile(new URL('../dist/keevault-browser.zip', import.meta.url), zipSync(files));
+await writeFile(new URL('../dist/keecove-browser.zip', import.meta.url), zipSync(files));

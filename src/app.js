@@ -24,7 +24,7 @@ let polling;
 let toastTimer;
 let unmountCloudPicker;
 let pageEpoch = 0;
-const brand = '<img src="/keevault.svg" alt="" width="40" height="40"><span>Keevault</span>';
+const brand = '<img src="/keevault.svg" alt="" width="40" height="40"><span>KeeCove</span>';
 const iconButton = (action, glyph, label, extra = '') =>
   `<button type="button" class="icon-btn ${extra}" data-action="${action}" aria-label="${label}" title="${label}">${icon(glyph)}</button>`;
 
@@ -77,7 +77,7 @@ function renderLocked() {
     <main class="lock-screen">
       <header class="lock-header">
         <div class="brand">${brand}</div>
-        <a class="subtle-link" href="/keevault-browser.zip" download>${icon('puzzle', 17)} Browser-Erweiterung</a>
+        <a class="subtle-link" href="/keecove-browser.zip" download>${icon('puzzle', 17)} Browser-Erweiterung</a>
       </header>
       <div class="lock-content">
         <div class="lock-card">
@@ -85,7 +85,7 @@ function renderLocked() {
           <p class="eyebrow">DEIN KEEPASS-TRESOR</p>
           <h1>${hasSource ? 'Tresor entsperren' : create ? 'Tresor erstellen' : 'Tresor öffnen'}</h1>
           <p class="lock-description">${hasSource ? 'Gib das Master-Passwort und bei Bedarf deine Schlüsseldatei ein.' : create
-            ? 'Keevault verschlüsselt den neuen Tresor im Browser und lädt ihn als KDBX herunter.'
+            ? 'KeeCove verschlüsselt den neuen Tresor im Browser und lädt ihn als KDBX herunter.'
             : 'Öffne eine KeePass-Datei von deinem Gerät oder aus deiner Cloud.'}</p>
           <div class="error-message" id="lock-error" role="alert" hidden></div>
           <div class="segmented source-tabs" aria-label="Tresorquelle">
@@ -373,7 +373,7 @@ function renderVault() {
           <div id="group-list" class="group-list"></div>
         </nav>
         <div class="sidebar-footer">
-          <a class="nav-link" href="/keevault-browser.zip" aria-label="Browser-Erweiterung herunterladen" download>${icon('puzzle', 17)}<span>Browser-Erweiterung</span></a>
+          <a class="nav-link" href="/keecove-browser.zip" aria-label="Browser-Erweiterung herunterladen" download>${icon('puzzle', 17)}<span>Browser-Erweiterung</span></a>
           <button type="button" class="nav-link" data-action="download" aria-label="KDBX exportieren">${icon('download', 17)}<span>KDBX exportieren</span></button>
           <button type="button" class="nav-link" data-action="lock" aria-label="Tresor sperren">${icon('lock', 17)}<span>Tresor sperren</span></button>
         </div>

@@ -8,7 +8,8 @@ import { test } from 'node:test';
 import { createVaultServer, readConfig } from '../server/http.mjs';
 
 const worker = '/assets/import-download.worker-fixture.js';
-const page = '<!doctype html><title>Keevault</title>';
+const page = '<!doctype html><title>KeeCove</title>';
+const extensionArchive = 'extension archive fixture';
 
 async function setup(context, env = {}) {
     const directory = await mkdtemp(join(tmpdir(), 'keevault-static-'));
@@ -18,6 +19,7 @@ async function setup(context, env = {}) {
     await mkdir(join(staticRoot, 'assets'), { recursive: true });
     await Promise.all([
         writeFile(join(staticRoot, 'index.html'), page),
+        writeFile(join(staticRoot, 'keecove-browser.zip'), extensionArchive),
         writeFile(join(staticRoot, worker.slice(1)), 'self.onmessage = () => {};'),
         writeFile(join(staticRoot, 'assets', 'index-fixture.js'), 'export {};'),
         writeFile(join(staticRoot, 'unpublished.kdbx'), 'fixture bytes inside the static root'),
@@ -57,6 +59,12 @@ test('the server only serves static assets and health, without any vault file ro
     assert.equal(head.status, 200);
     assert.equal(head.headers.get('content-length'), String(Buffer.byteLength(page)));
     assert.equal(await head.text(), '');
+    for (const path of ['/keecove-browser.zip', '/keevault-browser.zip']) {
+        const archive = await fetch(url(path));
+        assert.equal(archive.status, 200);
+        assert.equal(archive.headers.get('content-type'), 'application/zip');
+        assert.equal(await archive.text(), extensionArchive);
+    }
     assert.equal((await fetch(url('/healthz'))).status, 204);
     for (const path of ['/api/vault', '/api/events', '/data/vault.kdbx', '/unpublished.kdbx', '/%2e%2e%2foriginal.kdbx']) {
         assert.equal((await fetch(url(path))).status, 404);

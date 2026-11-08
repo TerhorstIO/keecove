@@ -18,7 +18,7 @@ form.addEventListener('submit', async (event) => {
   if (save.disabled) return;
   const vault = vaultAddress(input.value.trim());
   if (!vault) {
-    status.textContent = 'Gib eine Keevault-Startadresse ohne Pfad, Parameter oder Anmeldedaten ein.';
+    status.textContent = 'Gib eine KeeCove-Startadresse ohne Pfad, Parameter oder Anmeldedaten ein.';
     return;
   }
 
@@ -39,7 +39,7 @@ form.addEventListener('submit', async (event) => {
       await chrome.permissions.remove({ origins: [hostPattern(previous)] });
     }
     input.value = vault.href;
-    status.textContent = 'Adresse gespeichert. Du kannst Keevault jetzt über das Browser-Symbol öffnen.';
+    status.textContent = 'Adresse gespeichert. Du kannst KeeCove jetzt über das Browser-Symbol öffnen.';
   } catch {
     status.textContent = 'Die Einrichtung konnte nicht abgeschlossen werden.';
   } finally {

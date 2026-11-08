@@ -10,8 +10,8 @@ export class LocalFileConflictError extends Error {
 export class LocalFilePermissionError extends Error {
   constructor(mode, options) {
     super(mode === 'readwrite'
-      ? 'Erlaube Keevault den Schreibzugriff auf die KDBX-Datei.'
-      : 'Erlaube Keevault erneut den Lesezugriff auf die KDBX-Datei.', options);
+      ? 'Erlaube KeeCove den Schreibzugriff auf die KDBX-Datei.'
+      : 'Erlaube KeeCove erneut den Lesezugriff auf die KDBX-Datei.', options);
     this.mode = mode;
   }
 }

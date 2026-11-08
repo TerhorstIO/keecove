@@ -5,7 +5,7 @@ const config = readConfig();
 const app = await createVaultServer(config);
 app.server.listen(config.port, config.listenHost);
 await once(app.server, 'listening');
-console.log(`Keevault is listening via ${config.tls ? 'HTTPS' : 'HTTP'} on ${config.listenHost}:${config.port}.`);
+console.log(`KeeCove is listening via ${config.tls ? 'HTTPS' : 'HTTP'} on ${config.listenHost}:${config.port}.`);
 
 let closing = false;
 async function shutdown() {
