@@ -105,9 +105,14 @@ jobs:
           [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
           [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]
 
+          index=$(docker buildx imagetools inspect --raw "$IMAGE@$DIGEST")
           for arch in amd64 arm64; do
-            docker pull --platform "linux/$arch" "$IMAGE@$DIGEST"
-            docker image tag "$IMAGE@$DIGEST" "$IMAGE:$IMAGE_TAG"
+            manifest=$(jq -er --arg arch "$arch" '
+              [.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest]
+              | if length == 1 then .[0] else error("expected one manifest for linux/" + $arch) end
+            ' <<< "$index")
+            docker pull --platform "linux/$arch" "$IMAGE@$manifest"
+            docker image tag "$IMAGE@$manifest" "$IMAGE:$IMAGE_TAG"
             docker image save --platform "linux/$arch" \
               --output "keecove-linux-$arch.tar" "$IMAGE:$IMAGE_TAG"
           done
