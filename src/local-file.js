@@ -1,3 +1,4 @@
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { assertImportFileBytes, MAX_IMPORT_FILE_BYTES } from './import-session.js';
 
 export class LocalFileConflictError extends Error {
@@ -41,7 +42,7 @@ async function requirePermission(handle, mode) {
 }
 
 async function revisionOf(bytes) {
-  return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)).toHex();
+  return bytesToHex(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
 }
 
 export async function readLocalFile(handle) {

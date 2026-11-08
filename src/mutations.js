@@ -1,3 +1,4 @@
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { findEntry, findGroup, fieldText, KdbxUuid, ProtectedValue } from './kdbx.js';
 
 export const standardFields = ['Title', 'UserName', 'Password', 'URL', 'Notes'];
@@ -23,7 +24,7 @@ async function binaryFingerprint(binary) {
   if (binary.hash) return binary.hash;
   const raw = binary instanceof ProtectedValue ? binary.getBinary() : binary;
   try {
-    return new Uint8Array(await crypto.subtle.digest('SHA-256', raw)).toHex();
+    return bytesToHex(new Uint8Array(await crypto.subtle.digest('SHA-256', raw)));
   } finally {
     if (binary instanceof ProtectedValue) raw.fill(0);
   }
@@ -49,7 +50,7 @@ async function entryContent(entry) {
 export async function deleteFingerprint(entry) {
   const bytes = new TextEncoder().encode(JSON.stringify(await entryContent(entry)));
   try {
-    return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)).toHex();
+    return bytesToHex(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
   } finally {
     bytes.fill(0);
   }
