@@ -5,6 +5,7 @@ import { BrowserVaultSession, readImportSession } from '../src/browser-vault.js'
 import { createVault, findEntry, KdbxUuid, loadVault, makeCredentials } from '../src/kdbx.js';
 import { readLocalFile } from '../src/local-file.js';
 import { applyOperation, EditConflict, entryValues } from '../src/mutations.js';
+import { VaultSourceConflictError } from '../src/vault-source.js';
 
 const masterPassword = 'Synthetic test vault password';
 const initialValues = {
@@ -45,24 +46,63 @@ async function vaultFixture() {
   return { credentials, db, bytes: await db.save(), id, edit };
 }
 
-test('a real encrypted KDBX can be edited, locked and reopened from the browser session', async (t) => {
+test('a read-only KDBX can be locked and reopened without permitting copy edits', async (t) => {
   browserStorage(t);
   const fixture = await vaultFixture();
   const session = await BrowserVaultSession.start(fixture);
   const patch = { Password: 'Updated synthetic password', Notes: 'Browser session edit' };
-  const saved = await session.save(fixture.edit(initialValues, patch));
-  assert.equal(saved.changed, true);
+  await assert.rejects(session.save(fixture.edit(initialValues, patch)), /schreibgeschützt/);
 
   session.close();
   assert.equal(session.snapshot, null);
   await assert.rejects(session.refresh(), { name: 'AbortError' });
 
   const record = await readImportSession();
-  assert.notDeepEqual(record.bytes, fixture.bytes);
+  assert.deepEqual(record.bytes, fixture.bytes);
   const wrongCredentials = await makeCredentials('Wrong synthetic password');
   await assert.rejects(BrowserVaultSession.reopen(record, wrongCredentials), /Entsperren fehlgeschlagen/);
   const reopened = await BrowserVaultSession.reopen(record, await makeCredentials(masterPassword));
-  assert.deepEqual(entryValues(findEntry(reopened.snapshot.db, fixture.id)), { ...initialValues, ...patch });
+  assert.deepEqual(entryValues(findEntry(reopened.snapshot.db, fixture.id)), initialValues);
+  reopened.close();
+});
+
+test('a cloud write retries a stale revision, saves to the original and reopens from the cloud', async (t) => {
+  browserStorage(t);
+  const fixture = await vaultFixture();
+  const cloudFile = { provider: 'onedrive', id: 'vault', driveId: 'drive', name: 'vault.kdbx' };
+  const external = await loadVault(fixture.bytes, fixture.credentials);
+  const externalPatch = { UserName: 'external@example.com' };
+  await applyOperation(external, fixture.edit(initialValues, externalPatch));
+  const externalBytes = await external.save();
+  let current = { bytes: fixture.bytes, revision: '1' };
+  const attempts = [];
+  const source = {
+    label: 'OneDrive',
+    async read(revision) {
+      return current.revision === revision ? null : current;
+    },
+    async write(bytes, revision, { beforeCommit }) {
+      await beforeCommit();
+      attempts.push(revision);
+      if (current.revision === '1') current = { bytes: externalBytes, revision: '2' };
+      if (current.revision !== revision) throw new VaultSourceConflictError();
+      current = { bytes, revision: '3' };
+      return current.revision;
+    }
+  };
+  const session = await BrowserVaultSession.start({ ...fixture, cloudFile, source, sourceRevision: current.revision });
+  const webPatch = { Notes: 'Web edit' };
+  await session.save(fixture.edit(initialValues, webPatch));
+  assert.deepEqual(attempts, ['1', '2']);
+  assert.equal(session.snapshot.sourceRevision, '3');
+  session.close();
+
+  const record = await readImportSession();
+  assert.equal(record.bytes, undefined);
+  assert.deepEqual(record.cloudFile, cloudFile);
+  await assert.rejects(BrowserVaultSession.reopen(record, fixture.credentials), /Cloud-Datei erneut/);
+  const reopened = await BrowserVaultSession.reopen(record, fixture.credentials, { source });
+  assert.deepEqual(entryValues(findEntry(reopened.snapshot.db, fixture.id)), { ...initialValues, ...externalPatch, ...webPatch });
   reopened.close();
 });
 

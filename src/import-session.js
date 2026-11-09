@@ -8,12 +8,6 @@ const fileStore = 'files';
 
 class ImportSessionError extends Error {}
 
-export class ImportSessionConflictError extends ImportSessionError {
-  constructor() {
-    super('Die Sitzungskopie wurde in einem anderen Tab geändert. Lade sie vor dem Speichern neu.');
-  }
-}
-
 export function assertImportFileBytes(bytes) {
   if (bytes instanceof ArrayBuffer && bytes.byteLength > MAX_IMPORT_FILE_BYTES) {
     throw new ImportSessionError('Die KDBX-Datei darf höchstens 128 MiB groß sein.');
@@ -25,6 +19,17 @@ export function assertImportFileBytes(bytes) {
   if (header.getUint32(0, true) !== 0x9aa2d903 || header.getUint32(4, true) !== 0xb54bfb67) {
     throw new ImportSessionError('Für die Sitzung wird eine verschlüsselte KDBX-Datei benötigt.');
   }
+}
+
+function cloudFileReference(file) {
+  if (!file) return;
+  const { provider, id, driveId, name } = file;
+  const text = (value) => typeof value === 'string' && Boolean(value.trim()) && value.length <= 2048;
+  if (!['onedrive', 'dropbox', 'google'].includes(provider) || !text(id) || !text(name) ||
+      !/\.kdbx$/i.test(name) || (provider === 'onedrive' && !text(driveId))) {
+    throw new ImportSessionError('Die Cloud-Datei konnte nicht für die Sitzung gespeichert werden.');
+  }
+  return provider === 'onedrive' ? { provider, id, name, driveId } : { provider, id, name };
 }
 
 function openDatabase(indexedDB) {
@@ -127,7 +132,7 @@ export function createImportSessionStore({
         lookup.onsuccess = () => {
           const data = lookup.result;
           if (!data) return;
-          if (!includeBytes || data.expiresAt <= now()) {
+          if (!includeBytes || data.fileHandle || data.cloudFile || data.expiresAt <= now()) {
             report(data);
             return;
           }
@@ -137,7 +142,7 @@ export function createImportSessionStore({
           };
         };
       });
-      if (record && record.expiresAt > now() && (!includeBytes || record.bytes)) {
+      if (record && record.expiresAt > now() && (!includeBytes || record.bytes || record.fileHandle || record.cloudFile)) {
         await cleanupExpired().catch(() => {});
         return record;
       }
@@ -147,20 +152,23 @@ export function createImportSessionStore({
     });
   }
 
-  function startImportSession(bytes, { fileHandle } = {}) {
+  function startImportSession(bytes, { fileHandle, cloudFile } = {}) {
     return serialize(async (storage) => {
       assertImportFileBytes(bytes);
       if (fileHandle && (fileHandle.kind !== 'file' || (typeof FileSystemFileHandle === 'function' && !(fileHandle instanceof FileSystemFileHandle)))) {
         throw new ImportSessionError('Der Browser hat keinen gültigen Dateizugriff für die Sitzung geliefert.');
       }
+      const reference = cloudFileReference(cloudFile);
+      if (reference && fileHandle) throw new ImportSessionError('Die Tresordatei hat mehrere Quellen.');
       const previousId = storage.getItem(markerKey);
       await cleanupExpired();
       const id = crypto.randomUUID();
-      const record = { id, revision: crypto.randomUUID(), expiresAt: now() + IMPORT_SESSION_TTL_MS };
+      const record = { id, expiresAt: now() + IMPORT_SESSION_TTL_MS };
       if (fileHandle) record.fileHandle = fileHandle;
+      if (reference) record.cloudFile = reference;
       await transact('readwrite', (metadata, files) => {
         metadata.add(record);
-        files.add(bytes, id);
+        if (!fileHandle && !reference) files.add(bytes, id);
       });
       try {
         storage.setItem(markerKey, id);
@@ -170,36 +178,6 @@ export function createImportSessionStore({
       }
       if (previousId) await removeRecord(previousId).catch(() => {});
       return { ...record, bytes };
-    });
-  }
-
-  function saveImportSession(id, bytes, expectedRevision) {
-    return serialize(async (storage) => {
-      assertImportFileBytes(bytes);
-      if (!id || storage.getItem(markerKey) !== id) return null;
-      const result = await transact('readwrite', (metadata, files, report) => {
-        const lookup = metadata.get(id);
-        lookup.onsuccess = () => {
-          const record = lookup.result;
-          if (!record) return;
-          if (record.expiresAt <= now()) {
-            metadata.delete(id);
-            files.delete(id);
-            return;
-          }
-          if (expectedRevision !== undefined && record.revision !== expectedRevision) {
-            report(new ImportSessionConflictError());
-            return;
-          }
-          const updated = { ...record, revision: crypto.randomUUID() };
-          metadata.put(updated);
-          files.put(bytes, id);
-          report(updated);
-        };
-      });
-      if (result instanceof ImportSessionConflictError) throw result;
-      if (!result) storage.removeItem(markerKey);
-      return result ?? null;
     });
   }
 
@@ -216,7 +194,6 @@ export function createImportSessionStore({
     readImportSession: () => read(true),
     readImportSessionMetadata: () => read(false),
     startImportSession,
-    saveImportSession,
     clearImportSession
   };
 }
@@ -225,6 +202,5 @@ export const {
   readImportSession,
   readImportSessionMetadata,
   startImportSession,
-  saveImportSession,
   clearImportSession
 } = createImportSessionStore();

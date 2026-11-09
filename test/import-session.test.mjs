@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { IDBFactory } from 'fake-indexeddb';
-import { createImportSessionStore, IMPORT_SESSION_TTL_MS, ImportSessionConflictError } from '../src/import-session.js';
+import { createImportSessionStore, IMPORT_SESSION_TTL_MS } from '../src/import-session.js';
 import { LocalFileConflictError, LocalFilePermissionError, readLocalFile, writeLocalFile } from '../src/local-file.js';
 
 function kdbxFixture(lastByte) {
@@ -51,50 +51,24 @@ test('the encrypted file survives a reload only in the tab with the session mark
   assert.deepEqual(await tab.open().readImportSession(), session);
   assert.deepEqual(await tab.open().readImportSessionMetadata(), {
     id: session.id,
-    revision: session.revision,
     expiresAt: session.expiresAt
   });
   assert.deepEqual([...tab.values.values()], [session.id]);
   assert.equal(await makeTab().open().readImportSession(), null);
 });
 
-test('a save refreshes the revision without extending expiry', async () => {
+test('a read-only session remains available until the original expiry', async () => {
   const { makeTab, advance, indexedDB } = setup();
   const tab = makeTab();
   const cache = tab.open();
   const initial = await cache.startImportSession(kdbxFixture(1));
-  const bytes = kdbxFixture(2);
   advance(IMPORT_SESSION_TTL_MS - 1);
-  const updated = await cache.saveImportSession(initial.id, bytes, initial.revision);
-
-  assert.notEqual(updated.revision, initial.revision);
-  assert.equal(updated.expiresAt, initial.expiresAt);
-  assert.deepEqual((await cache.readImportSession()).bytes, bytes);
+  assert.deepEqual(await cache.readImportSession(), initial);
 
   advance(1);
-  assert.equal(await cache.saveImportSession(initial.id, bytes, updated.revision), null);
   assert.equal(await tab.open().readImportSession(), null);
   assert.equal(tab.values.size, 0);
   assert.equal(await storedFileCount(indexedDB), 0);
-});
-
-test('duplicated tabs reject a stale revision without changing the file', async () => {
-  const { makeTab } = setup();
-  const tab = makeTab();
-  const cache = tab.open();
-  const initial = await cache.startImportSession(kdbxFixture(1));
-  const duplicate = makeTab(new Map(tab.values)).open();
-  const bytes = kdbxFixture(2);
-  const results = await Promise.allSettled([
-    cache.saveImportSession(initial.id, bytes, initial.revision),
-    duplicate.saveImportSession(initial.id, bytes, initial.revision)
-  ]);
-
-  assert.equal(results.filter(({ status }) => status === 'fulfilled').length, 1);
-  const rejected = results.find(({ status }) => status === 'rejected');
-  assert.ok(rejected.reason instanceof ImportSessionConflictError);
-  assert.deepEqual((await cache.readImportSession()).bytes, bytes);
-  assert.deepEqual(await duplicate.readImportSession(), await cache.readImportSession());
 });
 
 test('replacement and explicit removal forget only the selected session', async () => {
@@ -139,17 +113,24 @@ test('the session refuses data without a KDBX signature', async () => {
   assert.equal(tab.values.size, 0);
 });
 
-test('the optional selected-file handle survives a reload and a cache save', async () => {
-  const { makeTab } = setup();
+test('direct file handles and cloud references survive a reload without storing a second KDBX', async () => {
+  const { makeTab, indexedDB } = setup();
   const tab = makeTab();
   const cache = tab.open();
   const fileHandle = { kind: 'file', name: 'selected.kdbx' };
   const first = await cache.startImportSession(kdbxFixture(1), { fileHandle });
 
-  await cache.saveImportSession(first.id, kdbxFixture(2), first.revision);
   assert.deepEqual((await tab.open().readImportSessionMetadata()).fileHandle, fileHandle);
-  assert.deepEqual((await tab.open().readImportSession()).fileHandle, fileHandle);
+  const local = await tab.open().readImportSession();
+  assert.deepEqual(local.fileHandle, fileHandle);
+  assert.equal(local.bytes, undefined);
+  assert.equal(await storedFileCount(indexedDB), 0);
   assert.deepEqual([...tab.values.values()], [first.id]);
+
+  const cloudFile = { provider: 'onedrive', id: 'selected', driveId: 'drive', name: 'selected.kdbx' };
+  const cloud = await cache.startImportSession(kdbxFixture(2), { cloudFile: { ...cloudFile, token: 'must not persist' } });
+  assert.deepEqual(await tab.open().readImportSession(), { id: cloud.id, expiresAt: cloud.expiresAt, cloudFile });
+  assert.equal(await storedFileCount(indexedDB), 0);
 });
 
 function localFileFixture() {

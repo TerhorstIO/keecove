@@ -11,6 +11,26 @@ const providers = [
   ['dropbox', 'Dropbox', connectDropbox]
 ];
 
+export function cloudProviderLabel(id) {
+  return providers.find(([provider]) => provider === id)?.[1] ?? 'Cloud';
+}
+
+export async function loadCloudConfig(signal) {
+  const response = await fetch('/cloud-config.json', { cache: 'no-store', signal });
+  if (!response.ok) throw new Error('Cloud-Anbieter konnten nicht geladen werden.');
+  return response.json();
+}
+
+export function connectCloudProvider(id, config, signal) {
+  const connect = providers.find(([provider]) => provider === id)?.[2];
+  if (!connect || !config[id]?.clientId) throw new Error('Dieser Cloud-Anbieter ist nicht verfügbar.');
+  return connect({
+    ...config[id],
+    authenticate: (options) => authenticate(options, signal),
+    downloadUrl: downloadImportUrl
+  });
+}
+
 export function mountCloudPicker(root, onSelect) {
   const lifetime = new AbortController();
   let operation;
@@ -48,8 +68,8 @@ export function mountCloudPicker(root, onSelect) {
       if (available.length) {
         const choices = document.createElement('div');
         choices.className = 'cloud-choices';
-        for (const [id, label, connect] of available) {
-          choices.append(button(label, () => void connectProvider(id, label, connect), {
+        for (const [id, label] of available) {
+          choices.append(button(label, () => void connectProvider(id, label), {
             glyph: 'folder', disabled: operation
           }));
         }
@@ -124,13 +144,9 @@ export function mountCloudPicker(root, onSelect) {
     }
   }
 
-  function connectProvider(id, label, connect) {
+  function connectProvider(id, label) {
     return run('Setze die Anmeldung im neuen Fenster fort. Erlaube Pop-ups, falls es sich nicht geöffnet hat.', async (signal) => {
-      const connection = await connect({
-        ...config[id],
-        authenticate: (options) => authenticate(options, signal),
-        downloadUrl: downloadImportUrl
-      });
+      const connection = await connectCloudProvider(id, config, signal);
       signal.throwIfAborted();
       const page = await connection.list(undefined, undefined, signal);
       signal.throwIfAborted();
@@ -157,16 +173,16 @@ export function mountCloudPicker(root, onSelect) {
 
   function selectFile(file) {
     return run('Verschlüsselte Datei wird geladen …', async (signal) => {
-      const bytes = await drive.download(file, signal);
+      const { bytes, revision, cloudFile } = await drive.open(file, signal);
       signal.throwIfAborted();
-      onSelect({ bytes, name: file.name });
+      onSelect({ bytes, name: cloudFile.name, cloudFile, source: drive.source(cloudFile), sourceRevision: revision });
     });
   }
 
   draw();
-  fetch('/cloud-config.json', { cache: 'no-store', signal: lifetime.signal }).then(async (response) => {
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    config = await response.json();
+  loadCloudConfig(lifetime.signal).then((result) => {
+    if (lifetime.signal.aborted) return;
+    config = result;
     status = '';
     draw();
   }).catch(() => {

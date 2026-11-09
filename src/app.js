@@ -3,13 +3,14 @@ import './import.css';
 import { activeEntries, activeGroups, createVault, fieldText, findEntry, KdbxUuid, loadVault, makeCredentials, ProtectedValue, webUrl } from './kdbx.js';
 import { deleteFingerprint, EditConflict, entryValues, standardFields } from './mutations.js';
 import { BrowserVaultSession, clearImportSession, readImportSession, readImportSessionMetadata, SessionExpiredError } from './browser-vault.js';
-import { mountCloudPicker } from './cloud-picker.js';
+import { cloudProviderLabel, connectCloudProvider, loadCloudConfig, mountCloudPicker } from './cloud-picker.js';
 import { checkImportBytes } from './import-bytes.js';
 import { createExtensionInstaller } from './extension-install.js';
 import { MAX_IMPORT_FILE_BYTES } from './import-session.js';
 import { canPickLocalFile, LocalFilePermissionError, pickLocalFile, readLocalFile, requestLocalFilePermission } from './local-file.js';
 import { icon } from './icons.js';
 import { renderVaultTree } from './vault-tree.js';
+import { CloudAuthError } from './vault-source.js';
 
 const app = document.querySelector('#app');
 const toast = document.querySelector('#toast');
@@ -25,6 +26,11 @@ const state = {
 let polling;
 let toastTimer;
 let unmountCloudPicker;
+let cloudConnection;
+let cloudReconnect;
+let cloudConfig;
+let cloudConfigRequest;
+let pageLifetime = new AbortController();
 let pageEpoch = 0;
 const brand = '<img src="/keevault.svg" alt="" width="40" height="40"><span>KeeCove</span>';
 const iconButton = (action, glyph, label, extra = '') =>
@@ -54,17 +60,125 @@ function entryTitle(entry) {
   return fieldText(entry, 'Title') || 'Ohne Titel';
 }
 
+function selectedCloudFile() {
+  if (state.session) return state.session.snapshot.cloudFile;
+  return (state.mode === 'session' ? state.available : state.pendingImport)?.cloudFile;
+}
+
+function sameCloudFile(left, right) {
+  return left && right && left.provider === right.provider && left.id === right.id && left.driveId === right.driveId;
+}
+
+function activeCloudSource(file) {
+  if (sameCloudFile(file, state.pendingImport?.cloudFile)) return state.pendingImport.source;
+  if (sameCloudFile(file, cloudConnection?.file)) return cloudConnection.source;
+}
+
+function cloudSource(file) {
+  const label = cloudProviderLabel(file.provider);
+  const writable = typeof activeCloudSource(file)?.write === 'function';
+  function requireConnection() {
+    const source = activeCloudSource(file);
+    if (!source) throw new CloudAuthError(label);
+    return source;
+  }
+  return {
+    label,
+    read: (...args) => requireConnection().read(...args),
+    ...(writable && { write: (...args) => requireConnection().write(...args) })
+  };
+}
+
+function disconnectCloud(file) {
+  if (sameCloudFile(file, cloudConnection?.file)) cloudConnection = null;
+  if (sameCloudFile(file, state.pendingImport?.cloudFile)) state.pendingImport.source = null;
+}
+
+function cancelCloudReconnect() {
+  cloudReconnect?.abort();
+  cloudReconnect = null;
+}
+
+function setCloudControls() {
+  const button = app.querySelector('[data-action="reconnect-cloud"]');
+  if (!button) return;
+  const file = selectedCloudFile();
+  const connected = Boolean(activeCloudSource(file));
+  button.hidden = !file || connected;
+  button.disabled = Boolean(cloudReconnect || cloudConfigRequest);
+  button.textContent = cloudReconnect ? 'Cloud-Anmeldung läuft …'
+    : cloudConfigRequest ? 'Cloud-Einstellungen werden geladen …'
+      : cloudConfig ? `${cloudProviderLabel(file?.provider)} erneut verbinden` : 'Cloud-Einstellungen neu laden';
+  const submit = app.querySelector('#unlock-form [type="submit"]');
+  if (submit && !state.busy) submit.disabled = !connected;
+}
+
+function prepareCloudConfig() {
+  if (cloudConfig || cloudConfigRequest) return;
+  cloudConfigRequest = loadCloudConfig().then((config) => {
+    cloudConfig = config;
+  }).catch(() => {
+    const file = selectedCloudFile();
+    if (file && !state.session && !activeCloudSource(file)) showLockError('Cloud-Anbieter konnten nicht geladen werden.');
+  }).finally(() => {
+    cloudConfigRequest = null;
+    setCloudControls();
+  });
+  setCloudControls();
+}
+
+async function reconnectCloud() {
+  const file = selectedCloudFile();
+  if (!file || cloudReconnect) return;
+  if (!cloudConfig) {
+    prepareCloudConfig();
+    return;
+  }
+  const controller = new AbortController();
+  const { signal } = controller;
+  const session = state.session;
+  cloudReconnect = controller;
+  if (!session) showLockError('');
+  setCloudControls();
+  try {
+    const connection = await connectCloudProvider(file.provider, cloudConfig, signal);
+    signal.throwIfAborted();
+    const source = connection.source(file);
+    if (session) {
+      cloudConnection = { file, source };
+      if (!await refresh()) disconnectCloud(file);
+    } else {
+      await source.read(undefined, signal);
+      signal.throwIfAborted();
+      if (sameCloudFile(file, state.pendingImport?.cloudFile)) state.pendingImport.source = source;
+      else cloudConnection = { file, source };
+    }
+  } catch (error) {
+    if (signal.aborted) return;
+    disconnectCloud(file);
+    if (session) state.syncError = error.message;
+    else showLockError(error.message);
+  } finally {
+    if (cloudReconnect === controller) {
+      cloudReconnect = null;
+      if (session) setSyncStatus();
+      else setCloudControls();
+    }
+  }
+}
+
 function setSyncStatus() {
   const status = app.querySelector('#sync-status');
   const error = app.querySelector('#sync-error');
   if (!status || !error) return;
   status.textContent = state.busy ? 'Speichert …' : state.syncError ? 'Dateizugriff prüfen'
-    : state.session?.isDirect ? 'Lokale Datei' : 'Sitzungskopie';
+    : state.session?.canWrite ? state.session.sourceLabel : 'Schreibgeschützt';
   status.parentElement.classList.toggle('sync-warning', Boolean(state.syncError));
   error.textContent = state.syncError;
   error.hidden = !state.syncError;
   const notice = app.querySelector('#draft-notice');
   if (notice) notice.hidden = !state.externalChange;
+  setCloudControls();
 }
 
 function renderLocked() {
@@ -73,6 +187,7 @@ function renderLocked() {
   const create = state.mode === 'create';
   const resumed = state.mode === 'session' && state.available;
   const hasSource = resumed || state.pendingImport;
+  const cloudFile = selectedCloudFile();
   const modes = [
     ['file', 'Datei', 'file'], ['cloud', 'Cloud', 'folder'], ['create', 'Neu', 'plus']
   ];
@@ -95,10 +210,11 @@ function renderLocked() {
           <div class="segmented source-tabs" aria-label="Tresorquelle">
             ${modes.map(([mode, label, glyph]) => `<button type="button" data-action="mode-${mode}" aria-pressed="${state.mode === mode}">${icon(glyph, 15)}${label}</button>`).join('')}
           </div>
-          ${state.available && state.mode !== 'session' ? '<p class="input-hint previous-session">Eine neue Datei ersetzt die bisherige Sitzung. Exportiere sie bei Bedarf vorher.</p>' : ''}
+          ${state.available && state.mode !== 'session' ? '<p class="input-hint previous-session">Eine neu geöffnete Datei ersetzt die bisherige Browsersitzung.</p>' : ''}
           ${hasSource || create ? `
             ${hasSource ? `<div class="source-ready">${icon('file', 17)}<span id="source-label"></span>
               ${iconButton(resumed ? 'forget-session' : 'discard-source', 'x', resumed ? 'Sitzung beenden' : 'Andere Datei wählen')}</div>` : ''}
+            ${cloudFile ? '<button type="button" class="btn secondary source-hint" data-action="reconnect-cloud" hidden></button>' : ''}
             <form id="unlock-form" autocomplete="off">
               ${create ? '<label for="vault-name">Tresorname</label><input id="vault-name" name="name" maxlength="120" value="Mein Tresor" required>' : ''}
               <label for="master-password">Master-Passwort</label>
@@ -114,9 +230,9 @@ function renderLocked() {
             ${canPickLocalFile() ? `<button type="button" class="btn primary source-direct" data-action="pick-direct">${icon('folder')} Lokale Datei direkt öffnen</button>
               <p class="input-hint source-hint">Änderungen werden in der ausgewählten Datei gespeichert.</p>` : ''}
             <form id="source-form" autocomplete="off">
-              <label for="vault-file">Datei als Sitzungskopie öffnen</label>
+              <label for="vault-file">Datei schreibgeschützt öffnen</label>
               <input id="vault-file" name="database" type="file" accept=".kdbx" required>
-              <button type="submit" class="btn secondary">${icon('upload')} Datei übernehmen</button>
+              <button type="submit" class="btn secondary">${icon('upload')} Datei auswählen</button>
             </form>`}
           <div class="privacy-note">${icon('shield', 17)} Entschlüsselung direkt in deinem Browser</div>
         </div>
@@ -126,7 +242,12 @@ function renderLocked() {
   showLockError(state.lockError);
   const sourceLabel = app.querySelector('#source-label');
   if (sourceLabel) {
-    sourceLabel.textContent = resumed ? 'Datei aus dieser Browsersitzung' : state.pendingImport.name;
+    sourceLabel.textContent = cloudFile ? `${cloudProviderLabel(cloudFile.provider)} · ${cloudFile.name}`
+      : resumed ? state.available.fileHandle?.name || 'Datei aus dieser Browsersitzung' : state.pendingImport.name;
+  }
+  if (cloudFile) {
+    prepareCloudConfig();
+    setCloudControls();
   }
   const picker = app.querySelector('#cloud-picker');
   if (picker) {
@@ -153,6 +274,8 @@ async function checkCachedSession({ initial = false } = {}) {
     const available = await readImportSessionMetadata();
     if (state.session || state.busy) return;
     if (state.available?.id === available?.id) return;
+    if (state.mode === 'session') cancelCloudReconnect();
+    if (sameCloudFile(state.available?.cloudFile, cloudConnection?.file)) cloudConnection = null;
     state.available = available;
     if (initial && state.mode === 'file' && available && !app.querySelector('#vault-file')?.files.length) state.mode = 'session';
     if (!available && state.mode === 'session') {
@@ -188,8 +311,10 @@ async function chooseSource(action) {
 
 async function endCachedSession() {
   if (state.busy) return;
-  if (!window.confirm('Dateiauswahl und Änderungen in der Sitzungskopie verwerfen?')) return;
+  if (!window.confirm('Die Browsersitzung beenden und die Dateiauswahl entfernen?')) return;
   state.busy = true;
+  cancelCloudReconnect();
+  disconnectCloud(state.available?.cloudFile);
   try {
     await clearImportSession(state.available?.id);
     state.available = null;
@@ -206,6 +331,7 @@ async function endCachedSession() {
 async function unlock(form) {
   if (state.busy) return;
   const epoch = pageEpoch;
+  const { signal } = pageLifetime;
   if (!window.isSecureContext || !globalThis.crypto?.subtle) {
     showLockError('Zum Entsperren brauchst du HTTPS oder eine lokale Adresse wie http://localhost.');
     return;
@@ -213,6 +339,11 @@ async function unlock(form) {
   const input = form.elements.password;
   let password = input.value;
   const creating = state.mode === 'create';
+  const cloudFile = selectedCloudFile();
+  if (cloudFile && !activeCloudSource(cloudFile)) {
+    showLockError(new CloudAuthError(cloudProviderLabel(cloudFile.provider)).message);
+    return;
+  }
   if (creating && password !== form.elements.repeat.value) {
     showLockError('Die beiden Master-Passwörter stimmen nicht überein.');
     return;
@@ -244,29 +375,41 @@ async function unlock(form) {
     const credentials = await makeCredentials(password, await keyFile?.arrayBuffer());
     password = '';
     if (epoch !== pageEpoch) return;
+    const source = cloudFile && cloudSource(cloudFile);
     let session;
     if (creating) {
       const db = createVault(credentials, name);
       const bytes = await db.save();
       if (epoch !== pageEpoch) return;
       download(bytes, `${name}.kdbx`);
-      session = await BrowserVaultSession.start({ bytes, db, credentials });
+      state.mode = 'file';
+      state.pendingImport = null;
+      renderLocked();
+      notify('Tresor erstellt. Wähle die heruntergeladene Datei zum Öffnen aus.');
+      return;
     } else if (cached) {
-      session = await BrowserVaultSession.reopen(cached, credentials);
+      session = await BrowserVaultSession.reopen(cached, credentials, { source, signal });
     } else {
+      const pending = state.pendingImport;
       const disk = fileHandle ? await readLocalFile(fileHandle) : null;
-      const bytes = checkImportBytes(disk?.bytes ?? state.pendingImport.bytes);
+      const cloud = source ? await source.read(pending.sourceRevision, signal) : null;
+      if (epoch !== pageEpoch) return;
+      const bytes = checkImportBytes(disk?.bytes ?? cloud?.bytes ?? pending.bytes);
       const db = await loadVault(bytes, credentials);
       if (epoch !== pageEpoch) return;
-      session = await BrowserVaultSession.start({ bytes, db, credentials, fileHandle, diskRevision: disk?.revision });
+      session = await BrowserVaultSession.start({
+        bytes, db, credentials, fileHandle, diskRevision: disk?.revision,
+        cloudFile, source, sourceRevision: cloud?.revision ?? pending.sourceRevision
+      });
     }
     if (epoch !== pageEpoch) {
       session.close();
       return;
     }
+    cloudConnection = cloudFile ? { file: cloudFile, source: activeCloudSource(cloudFile) } : null;
     state.session = session;
-    const { id, expiresAt, fileHandle: sessionFile } = session.snapshot;
-    state.available = { id, expiresAt, fileHandle: sessionFile };
+    const { id, expiresAt, fileHandle: sessionFile, cloudFile: sessionCloudFile } = session.snapshot;
+    state.available = { id, expiresAt, fileHandle: sessionFile, cloudFile: sessionCloudFile };
     state.pendingImport = null;
     state.lastActivity = Date.now();
     state.selection = activeEntries(session.snapshot.db).next().value?.uuid.id ?? null;
@@ -275,22 +418,28 @@ async function unlock(form) {
   } catch (error) {
     if (epoch !== pageEpoch) return;
     if (error instanceof SessionExpiredError) {
+      disconnectCloud(state.available?.cloudFile);
       state.available = null;
       state.mode = 'file';
       state.lockError = error.message;
       renderLocked();
     } else {
+      if (error instanceof CloudAuthError) disconnectCloud(cloudFile);
       showLockError(error.message);
       submit.innerHTML = submitLabel;
       submit.disabled = false;
     }
   } finally {
-    if (epoch === pageEpoch) state.busy = false;
+    if (epoch === pageEpoch) {
+      state.busy = false;
+      setCloudControls();
+    }
   }
 }
 
 function lock(message = '') {
   extensionInstaller.close();
+  cancelCloudReconnect();
   state.session?.close();
   Object.assign(state, {
     session: null, busy: false, selection: null, group: '', query: '', draft: null,
@@ -304,6 +453,7 @@ function lock(message = '') {
 
 function expireSession() {
   const id = state.available?.id;
+  disconnectCloud(state.available?.cloudFile);
   state.available = null;
   lock(new SessionExpiredError().message);
   if (id) void clearImportSession(id).catch(() => {});
@@ -366,6 +516,7 @@ function renderGroups(db) {
 function renderVault() {
   const db = currentDb();
   if (!db) return;
+  const writable = state.session.canWrite;
   const focused = document.activeElement;
   app.innerHTML = `
     <main class="workspace ${state.mobileDetail ? 'show-detail' : ''}">
@@ -374,11 +525,10 @@ function renderVault() {
         <div class="vault-badge">${icon('shield', 19)}<div><small>AKTIVER TRESOR</small><strong id="vault-label"></strong></div></div>
         <nav class="group-navigation" aria-label="Tresorgruppen">
           <button type="button" class="nav-link all-entries-link" data-action="filter" aria-pressed="${!state.group}">${icon('grid', 17)} <span>Alle Einträge</span></button>
-          <div class="nav-caption"><span>ORDNER</span>${iconButton('new-group', 'plus', 'Gruppe erstellen')}</div>
+          <div class="nav-caption"><span>ORDNER</span>${writable ? iconButton('new-group', 'plus', 'Gruppe erstellen') : ''}</div>
           <div id="group-list" class="group-list"></div>
         </nav>
         <div class="sidebar-footer">
-          <button type="button" class="nav-link" data-action="download" aria-label="KDBX exportieren">${icon('download', 17)}<span>KDBX exportieren</span></button>
           <button type="button" class="nav-link" data-action="lock" aria-label="Tresor sperren">${icon('lock', 17)}<span>Tresor sperren</span></button>
         </div>
       </aside>
@@ -387,12 +537,13 @@ function renderVault() {
           <div><p class="eyebrow">KEEPASS-DATENBANK</p><h1>Tresor</h1></div>
           <div class="workspace-actions">
             <button type="button" class="sync-pill" data-action="refresh" aria-label="Dateiversion jetzt prüfen"><span class="status-dot"></span><span id="sync-status"></span>${icon('refresh', 14)}</button>
-            <button type="button" class="btn primary" data-action="new">${icon('plus', 18)} <span>Neuer Eintrag</span></button>
+            ${writable ? `<button type="button" class="btn primary" data-action="new">${icon('plus', 18)} <span>Neuer Eintrag</span></button>` : ''}
             ${extensionButton('btn secondary')}
           </div>
         </header>
         <p id="sync-error" class="sync-error" role="status" hidden></p>
-        ${state.session.isDirect ? '' : '<p class="workspace-source-note">Änderungen bleiben in dieser Sitzung. Mit „KDBX exportieren“ lädst du die aktuelle Datei herunter.</p>'}
+        ${selectedCloudFile() ? '<button type="button" class="btn secondary source-hint" data-action="reconnect-cloud" hidden></button>' : ''}
+        ${writable ? '' : '<p class="workspace-source-note">Dieser Tresor ist schreibgeschützt geöffnet.</p>'}
         <div class="workspace-columns">
           <section class="entry-panel" aria-label="Einträge">
             <div class="entry-panel-header">
@@ -411,6 +562,7 @@ function renderVault() {
   renderGroups(db);
   renderList();
   renderDetail();
+  if (selectedCloudFile()) prepareCloudConfig();
   setSyncStatus();
   if (focused?.id === 'search') {
     const search = app.querySelector('#search');
@@ -454,20 +606,21 @@ function renderDetail() {
     return;
   }
   const entry = findEntry(currentDb(), state.selection);
+  const writable = state.session.canWrite;
   if (!entry) {
     panel.innerHTML = `<div class="detail-empty">
       <div class="empty-icon">${icon('key', 29)}</div>
-      <h2>Deine Zugangsdaten</h2><p>Wähle einen Eintrag aus oder lege einen neuen an.</p>
-      <button class="btn secondary" data-action="new">${icon('plus', 17)} Neuer Eintrag</button>
+      <h2>Deine Zugangsdaten</h2><p>${writable ? 'Wähle einen Eintrag aus oder lege einen neuen an.' : 'Wähle einen Eintrag aus.'}</p>
+      ${writable ? `<button class="btn secondary" data-action="new">${icon('plus', 17)} Neuer Eintrag</button>` : ''}
     </div>`;
     return;
   }
   panel.innerHTML = `<div class="detail-inner">
     <button type="button" class="btn quiet mobile-back" data-action="back">${icon('back', 17)} Alle Einträge</button>
-    <header class="detail-header"><div class="detail-identity" id="detail-identity"></div><div class="detail-toolbar">
+    <header class="detail-header"><div class="detail-identity" id="detail-identity"></div>${writable ? `<div class="detail-toolbar">
       <button type="button" class="btn secondary" data-action="edit">${icon('edit', 16)} Bearbeiten</button>
       ${iconButton('delete', 'trash', 'Eintrag löschen', 'delete-button')}
-    </div></header>
+    </div>` : ''}</header>
     <h3 class="section-label">ZUGANGSDATEN</h3><div id="credentials" class="field-card"></div>
     <div id="extra-fields"></div><div id="attachments"></div>
     <p id="entry-date" class="detail-footer"></p>
@@ -562,6 +715,7 @@ function renderEditor(panel) {
 }
 
 function openEditor(type) {
+  if (!state.session?.canWrite) return;
   const db = currentDb();
   if (state.draft && !window.confirm('Aktuellen Entwurf verwerfen?')) return;
   const group = state.group || db.getDefaultGroup().uuid.id;
@@ -592,8 +746,14 @@ function discardDraft() {
 }
 
 async function saveOperation(operation) {
-  if (state.busy) return;
   const session = state.session;
+  if (state.busy || !session?.canWrite) return;
+  const cloudFile = session.snapshot.cloudFile;
+  if (cloudFile && !activeCloudSource(cloudFile)) {
+    state.syncError = new CloudAuthError(session.sourceLabel).message;
+    setSyncStatus();
+    return;
+  }
   state.busy = true;
   setSyncStatus();
   const form = app.querySelector('#edit-form');
@@ -610,11 +770,16 @@ async function saveOperation(operation) {
     else state.selection = result.id ?? null;
     if (state.selection && state.group && findEntry(currentDb(), state.selection)?.parentGroup.uuid.id !== state.group) state.group = '';
     renderVault();
-    notify(operation.type === 'delete' ? 'Eintrag entfernt' : session.isDirect ? 'Lokale Datei gespeichert' : 'Sitzungskopie gespeichert');
+    notify(operation.type === 'delete' ? 'Eintrag entfernt' : 'Tresordatei gespeichert');
   } catch (error) {
     if (state.session !== session) return;
     if (error instanceof SessionExpiredError) {
       expireSession();
+      return;
+    }
+    if (error instanceof CloudAuthError) {
+      disconnectCloud(cloudFile);
+      state.syncError = error.message;
       return;
     }
     const output = app.querySelector('#edit-error');
@@ -639,7 +804,7 @@ async function saveOperation(operation) {
 }
 
 async function removeEntry() {
-  if (state.busy) return;
+  if (state.busy || !state.session?.canWrite) return;
   const session = state.session;
   const entry = findEntry(currentDb(), state.selection);
   if (!entry || !window.confirm(`„${entryTitle(entry)}“ wirklich entfernen?`)) return;
@@ -661,6 +826,12 @@ async function refresh({ manual = false } = {}) {
     return false;
   }
   if (state.busy) return false;
+  const cloudFile = state.session.snapshot.cloudFile;
+  if (cloudFile && !activeCloudSource(cloudFile)) {
+    state.syncError ||= new CloudAuthError(state.session.sourceLabel).message;
+    setSyncStatus();
+    return false;
+  }
   if (polling?.session === state.session) return polling.promise;
   const session = state.session;
   const promise = (async () => {
@@ -689,6 +860,7 @@ async function refresh({ manual = false } = {}) {
       if (state.session === session) {
         if (error instanceof SessionExpiredError) expireSession();
         else {
+          if (error instanceof CloudAuthError) disconnectCloud(cloudFile);
           state.syncError = error.message;
           setSyncStatus();
         }
@@ -778,9 +950,14 @@ app.addEventListener('click', (event) => {
     return;
   }
   if (state.busy && action !== 'lock') return;
+  if (action === 'reconnect-cloud') {
+    void reconnectCloud();
+    return;
+  }
   if (action.startsWith('mode-')) {
     const mode = action.slice(5);
     if (mode === state.mode) return;
+    cancelCloudReconnect();
     state.mode = mode;
     state.pendingImport = null;
     state.lockError = '';
@@ -794,6 +971,7 @@ app.addEventListener('click', (event) => {
   }
   if (action === 'forget-session') void endCachedSession();
   if (action === 'discard-source') {
+    cancelCloudReconnect();
     state.pendingImport = null;
     state.lockError = '';
     renderLocked();
@@ -844,10 +1022,6 @@ app.addEventListener('click', (event) => {
       values: { ...state.draft.values }, group: state.draft.group
     };
     void saveOperation(operation);
-  }
-  if (action === 'download') {
-    const { bytes, db } = state.session.snapshot;
-    download(bytes, `${db.meta.name || 'Tresor'}.kdbx`);
   }
   const db = currentDb();
   const entry = db && findEntry(db, state.selection);
@@ -905,6 +1079,10 @@ window.addEventListener('focus', () => { void refresh({ manual: !state.session }
 window.addEventListener('pagehide', () => {
   extensionInstaller.close();
   pageEpoch++;
+  pageLifetime.abort();
+  pageLifetime = new AbortController();
+  cancelCloudReconnect();
+  cloudConnection = null;
   unmountCloudPicker?.();
   if (state.session) lock();
   else {

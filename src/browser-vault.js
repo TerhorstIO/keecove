@@ -1,7 +1,8 @@
 import { loadVault } from './kdbx.js';
 import { applyOperation } from './mutations.js';
-import { clearImportSession, ImportSessionConflictError, readImportSession, readImportSessionMetadata, saveImportSession, startImportSession } from './import-session.js';
-import { LocalFileConflictError, readLocalFile, writeLocalFile } from './local-file.js';
+import { clearImportSession, readImportSession, readImportSessionMetadata, startImportSession } from './import-session.js';
+import { readLocalFile, writeLocalFile } from './local-file.js';
+import { VaultSourceConflictError } from './vault-source.js';
 
 export class SessionExpiredError extends Error {
   constructor() {
@@ -9,48 +10,68 @@ export class SessionExpiredError extends Error {
   }
 }
 
+function localSource(handle) {
+  if (!handle) return;
+  return {
+    label: 'Lokale Datei',
+    async read(previousRevision) {
+      const file = await readLocalFile(handle);
+      return file.revision !== previousRevision ? file : null;
+    },
+    write: (bytes, revision, options) => writeLocalFile(handle, bytes, revision, options)
+  };
+}
+
 export class BrowserVaultSession {
   #controller = new AbortController();
   #queue = Promise.resolve();
   #snapshot;
   #credentials;
-  #handle;
+  #source;
 
-  constructor(snapshot, credentials, handle) {
+  constructor(snapshot, credentials, source) {
     this.#snapshot = snapshot;
     this.#credentials = credentials;
-    this.#handle = handle;
+    this.#source = source;
   }
 
-  static async start({ bytes, db, credentials, fileHandle, diskRevision }) {
-    const record = await startImportSession(bytes, { fileHandle });
-    return new BrowserVaultSession({ ...record, db, diskRevision }, credentials, fileHandle);
+  static async start({ bytes, db, credentials, fileHandle, diskRevision, cloudFile, source, sourceRevision }) {
+    const directSource = cloudFile ? source : localSource(fileHandle);
+    if (cloudFile && !directSource) throw new Error('Verbinde die Cloud-Datei erneut.');
+    const record = await startImportSession(bytes, { fileHandle, cloudFile });
+    return new BrowserVaultSession({ ...record, db, sourceRevision: fileHandle ? diskRevision : sourceRevision }, credentials, directSource);
   }
 
-  static async reopen(record, credentials) {
-    const latest = record.fileHandle ? await readLocalFile(record.fileHandle) : null;
+  static async reopen(record, credentials, { source, signal } = {}) {
+    const directSource = record.cloudFile ? source : localSource(record.fileHandle);
+    if (record.cloudFile && !directSource) throw new Error('Verbinde die Cloud-Datei erneut.');
+    const latest = await directSource?.read(undefined, signal);
+    signal?.throwIfAborted();
     const bytes = latest?.bytes ?? record.bytes;
     const db = await loadVault(bytes, credentials);
     const metadata = await readImportSessionMetadata();
+    signal?.throwIfAborted();
     if (metadata?.id !== record.id) throw new SessionExpiredError();
-    const session = new BrowserVaultSession({ ...record, bytes, db, diskRevision: latest?.revision }, credentials, record.fileHandle);
-    if (!record.fileHandle && metadata.revision !== record.revision) await session.refresh();
-    return session;
+    return new BrowserVaultSession({ ...record, bytes, db, sourceRevision: latest?.revision }, credentials, directSource);
   }
 
   get snapshot() {
     return this.#snapshot;
   }
 
-  get isDirect() {
-    return Boolean(this.#handle);
+  get canWrite() {
+    return typeof this.#source?.write === 'function';
+  }
+
+  get sourceLabel() {
+    return this.#source?.label ?? 'Schreibgeschützt';
   }
 
   close() {
     this.#controller.abort();
     this.#snapshot = null;
     this.#credentials = null;
-    this.#handle = null;
+    this.#source = null;
   }
 
   #serial(action) {
@@ -67,17 +88,10 @@ export class BrowserVaultSession {
     const metadata = await readImportSessionMetadata();
     signal.throwIfAborted();
     if (metadata?.id !== snapshot.id) throw new SessionExpiredError();
-    let next;
-    if (this.#handle) {
-      const disk = await readLocalFile(this.#handle);
-      if (disk.revision === snapshot.diskRevision) return false;
-      next = { ...metadata, bytes: disk.bytes, diskRevision: disk.revision };
-    } else {
-      if (metadata.revision === snapshot.revision) return false;
-      next = await readImportSession();
-      if (next?.id !== snapshot.id) throw new SessionExpiredError();
-    }
+    if (!this.#source) return false;
+    const next = await this.#source.read(snapshot.sourceRevision, signal);
     signal.throwIfAborted();
+    if (!next) return false;
     let db;
     try {
       db = await loadVault(next.bytes, this.#credentials);
@@ -89,7 +103,7 @@ export class BrowserVaultSession {
     if (db.getDefaultGroup().uuid.id !== snapshot.db.getDefaultGroup().uuid.id) {
       throw new Error('An diesem Pfad liegt inzwischen ein anderer Tresor. Öffne die Datei erneut.');
     }
-    this.#snapshot = { ...next, db };
+    this.#snapshot = { ...metadata, bytes: next.bytes, db, sourceRevision: next.revision };
     return true;
   }
 
@@ -99,6 +113,7 @@ export class BrowserVaultSession {
 
   save(operation) {
     return this.#serial(async (signal) => {
+      if (!this.canWrite) throw new Error('Diese Tresordatei ist schreibgeschützt geöffnet.');
       for (let attempt = 0; attempt < 3; attempt++) {
         await this.#refresh(signal);
         signal.throwIfAborted();
@@ -110,24 +125,17 @@ export class BrowserVaultSession {
         const bytes = await db.save();
         signal.throwIfAborted();
         try {
-          if (this.#handle) {
-            const checkExpiry = () => {
-              if (Date.now() >= previous.expiresAt) throw new SessionExpiredError();
-            };
-            checkExpiry();
-            const diskRevision = await writeLocalFile(this.#handle, bytes, previous.diskRevision, { signal, beforeCommit: checkExpiry });
+          const beforeCommit = async () => {
+            const active = await readImportSessionMetadata();
             signal.throwIfAborted();
-            this.#snapshot = { ...previous, bytes, db, diskRevision };
-          } else {
-            const metadata = await saveImportSession(previous.id, bytes, previous.revision);
-            if (!metadata) throw new SessionExpiredError();
-            signal.throwIfAborted();
-            this.#snapshot = { ...metadata, bytes, db };
-          }
+            if (active?.id !== previous.id || Date.now() >= previous.expiresAt) throw new SessionExpiredError();
+          };
+          const sourceRevision = await this.#source.write(bytes, previous.sourceRevision, { signal, beforeCommit });
+          signal.throwIfAborted();
+          this.#snapshot = { ...previous, bytes, db, sourceRevision };
           return result;
         } catch (error) {
-          const conflict = error instanceof ImportSessionConflictError || error instanceof LocalFileConflictError;
-          if (!conflict || attempt === 2) throw error;
+          if (!(error instanceof VaultSourceConflictError) || attempt === 2) throw error;
         }
       }
     });

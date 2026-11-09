@@ -1,5 +1,6 @@
 import { MAX_IMPORT_FILE_BYTES } from './import-session.js';
 import { readImportDownload } from './import-bytes.js';
+import { CloudAuthError, VaultSourceConflictError } from './vault-source.js';
 
 const folderMimeType = 'application/vnd.google-apps.folder';
 const api = 'https://www.googleapis.com/drive/v3/files';
@@ -20,11 +21,39 @@ export async function connectGoogleDrive({ clientId, authenticate }) {
       credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer',
       redirect: 'error', signal: signal ? AbortSignal.any([signal, timeout]) : timeout
     });
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) throw new CloudAuthError('Google Drive');
+    if (response.status === 403) {
       throw new Error('Google Drive hat den Zugriff verweigert. Prüfe die Freigabe oder melde dich erneut an.');
     }
     if (!response.ok) throw new Error('Google Drive konnte die Anfrage nicht ausführen.');
     return response;
+  }
+
+  function source(file) {
+    if (file?.provider !== 'google' || !/^[\w-]+$/.test(file.id ?? '') || !/\.kdbx$/i.test(file.name ?? '')) {
+      throw new Error('Ungültige Google-Drive-Datei.');
+    }
+    const item = `${api}/${encodeURIComponent(file.id)}`;
+    async function metadata(signal) {
+      const data = await (await request(`${item}?fields=id,size,trashed,version`, signal)).json();
+      if (data.id !== file.id || data.trashed || typeof data.version !== 'string' || !/^\d+$/.test(data.version)) {
+        throw new Error('Die Dateiversion in Google Drive konnte nicht geprüft werden.');
+      }
+      if (Number(data.size) > MAX_IMPORT_FILE_BYTES) throw new Error('Die Datei überschreitet das Importlimit von 128 MiB.');
+      return data.version;
+    }
+    return {
+      label: 'Google Drive',
+      async read(previousRevision, signal) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const revision = await metadata(signal);
+          if (revision === previousRevision) return null;
+          const bytes = await readImportDownload(await request(`${item}?alt=media`, signal));
+          if (await metadata(signal) === revision) return { bytes, revision };
+        }
+        throw new VaultSourceConflictError('Die Tresordatei wird gerade in Google Drive geändert. Versuche es erneut.');
+      }
+    };
   }
 
   return {
@@ -49,10 +78,13 @@ export async function connectGoogleDrive({ clientId, authenticate }) {
       return { items, nextPage: data.nextPageToken ?? null };
     },
 
-    async download(file, signal) {
+    async open(file, signal) {
       if (file.size > MAX_IMPORT_FILE_BYTES) throw new Error('Die Datei überschreitet das Importlimit von 128 MiB.');
-      if (file.kind !== 'file' || !/^[\w-]+$/.test(file.id)) throw new Error('Ungültige Google-Drive-Datei.');
-      return readImportDownload(await request(`${api}/${encodeURIComponent(file.id)}?alt=media`, signal));
-    }
+      if (file.kind !== 'file') throw new Error('Ungültige Google-Drive-Datei.');
+      const cloudFile = { provider: 'google', id: file.id, name: file.name };
+      return { ...await source(cloudFile).read(undefined, signal), cloudFile };
+    },
+
+    source
   };
 }

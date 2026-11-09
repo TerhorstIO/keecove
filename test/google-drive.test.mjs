@@ -14,6 +14,7 @@ test('Google Drive imports KDBX files through the fixed read-only API', async (t
     assert.equal(options.redirect, 'error');
     assert.equal(options.credentials, 'omit');
     if (url.searchParams.get('alt') === 'media') return new Response(bytes);
+    if (url.pathname.endsWith('/vault')) return Response.json({ id: 'vault', version: '7', size: String(bytes.length) });
     if (url.searchParams.get('pageToken') === 'opaque') {
       return Response.json({ files: [{ id: 'vault', name: 'Imported.KDBX', size: String(bytes.byteLength) }] });
     }
@@ -39,11 +40,18 @@ test('Google Drive imports KDBX files through the fixed read-only API', async (t
   assert.deepEqual(first.items.map(({ name, kind }) => ({ name, kind })), [{ name: 'Secure files', kind: 'folder' }]);
   const second = await client.list(first.items[0], first.nextPage);
   assert.equal(second.items[0].size, bytes.byteLength);
-  assert.deepEqual(new Uint8Array(await client.download(second.items[0])), bytes);
+  const opened = await client.open(second.items[0]);
+  assert.deepEqual(new Uint8Array(opened.bytes), bytes);
+  assert.equal(opened.revision, '7');
+  assert.deepEqual(opened.cloudFile, { provider: 'google', id: 'vault', name: 'Imported.KDBX' });
+  const source = client.source(opened.cloudFile);
+  assert.equal(source.write, undefined);
+  assert.equal(await source.read('7'), null);
   await assert.rejects(client.list({ id: "' or true" }), /Ungültiger Google-Drive-Ordner/);
-  await assert.rejects(client.download({ kind: 'file', id: '//other.example' }), /Ungültige Google-Drive-Datei/);
+  await assert.rejects(client.open({ kind: 'file', id: '//other.example', name: 'vault.kdbx' }), /Ungültige Google-Drive-Datei/);
   assert.deepEqual(requests.map((url) => url.pathname), [
-    '/drive/v3/files', '/drive/v3/files', '/drive/v3/files/vault'
+    '/drive/v3/files', '/drive/v3/files', '/drive/v3/files/vault', '/drive/v3/files/vault',
+    '/drive/v3/files/vault', '/drive/v3/files/vault'
   ]);
   assert.equal(requests[0].searchParams.get('q'), "'root' in parents and trashed = false");
   assert.equal(requests[1].searchParams.get('q'), "'folder' in parents and trashed = false");

@@ -1,6 +1,6 @@
 # KeeCove
 
-Browserbasierter Passwortmanager für KeePass-Dateien. Öffnen, Entschlüsseln, Bearbeiten und Speichern der KDBX-Datei erfolgen auf deinem Gerät.
+Browserbasierter Passwortmanager für KeePass-Dateien. KeeCove entschlüsselt und bearbeitet KDBX-Dateien im Browser.
 
 ## Deployment mit Docker
 
@@ -38,10 +38,13 @@ Vorab-Releases laden das Image mit `:latest`. Wenn du einen Versionsrelease impo
 ## Datei öffnen oder erstellen
 
 - **Lokale Datei direkt öffnen.** Chrome und Edge können nach deiner Freigabe dieselbe KDBX-Datei lesen und schreiben, die du in KeePass oder KeePassXC verwendest. KeeCove prüft die Dateiversion beim Fokuswechsel, regelmäßig während der geöffneten Sitzung und vor jedem Speichern. Änderungen an verschiedenen Feldern können zusammengeführt werden. Bei einem Konflikt im selben Feld bleibt der Entwurf offen. Zwischen der letzten Prüfung und dem Speichern bleibt bei einem zeitgleichen unabhängigen Schreibvorgang ein kleines Zeitfenster. [Chrome-Dateizugriff](https://developer.chrome.com/docs/capabilities/web-apis/file-system-access)
-- **Datei oder Cloud als Sitzungskopie öffnen.** KeeCove lädt eine verschlüsselte Kopie in den Browser. Cloud-Dateien werden nach der Anmeldung mit Leserechten geöffnet. Lade bearbeitete Sitzungskopien über **KDBX exportieren** herunter.
-- **Neu.** KeeCove erstellt eine KDBX-4-Datei mit Argon2id und lädt sie auf dein Gerät herunter. Die geöffnete Sitzungskopie kann weiter bearbeitet werden. Mit **KDBX exportieren** lädst du ihren aktuellen Stand herunter.
+- **OneDrive und Dropbox direkt öffnen.** KeeCove prüft die Dateiversion regelmäßig und vor dem Speichern. Änderungen werden als verschlüsselte KDBX in dieselbe Datei zurückgeschrieben. Beim Speichern sendet KeeCove die erwartete Version mit.
+- **Schreibgeschützt öffnen.** Tresore in Google Drive und lokale Dateien in Browsern ohne direkten Dateizugriff kannst du lesen. Eine über Google Drive für Desktop synchronisierte Datei kannst du in Chrome oder Edge als lokale Datei direkt öffnen und bearbeiten.
+- **Neu.** KeeCove erstellt eine KDBX-4-Datei mit Argon2id und lädt sie auf dein Gerät herunter. Öffne sie anschließend als lokale Datei, um sie zu bearbeiten.
 
-Ein gesperrter Tresor kann bis zu acht Stunden nach dem Öffnen im selben Tab erneut entsperrt werden, auch nach einem Neuladen. KeeCove speichert dafür die verschlüsselte KDBX und gegebenenfalls die Referenz zur lokalen Datei im Browser. Master-Passwort, Schlüsseldatei, Cloud-Tokens und Download-Links werden für die Wiederaufnahme nicht gespeichert. Bei Tresoren mit Schlüsseldatei wird diese erneut benötigt. Nach fünf Minuten Inaktivität sperrt KeeCove. Nach Ablauf der Sitzung oder Schließen des Tabs musst du die Datei erneut auswählen. Browser können bei direkt geöffneten Dateien erneut um Zugriffsfreigabe bitten.
+Für direkt geöffnete Tresore merkt sich KeeCove nur die Dateireferenz in der Browsersitzung. Du kannst den Tresor im selben Tab bis zu acht Stunden nach dem Öffnen erneut entsperren, auch nach einem Neuladen. Gib dafür das Master-Passwort und bei Bedarf die Schlüsseldatei ein. Nach fünf Minuten Inaktivität sperrt KeeCove. Nach Ablauf der Sitzung oder Schließen des Tabs wählst du die Datei erneut aus. Bei lokalen Dateien kann der Browser erneut um Zugriffsfreigabe bitten.
+
+Die Cloud-Zugriffstokens liegen im Arbeitsspeicher des geöffneten Tabs. Nach einem Neuladen oder Tokenablauf verbindest du dasselbe Cloud-Konto erneut. Innerhalb der acht Stunden bleibt die Dateiauswahl erhalten.
 
 KDBX 3 und 4 werden unterstützt, einschließlich AES, ChaCha20, AES-KDF, Argon2d, Argon2id und Schlüsseldateien. Das Importlimit beträgt 128 MiB. Die entsperrte Ansicht zeigt Gruppen und Unterordner links, die Einträge der ausgewählten Gruppe darüber im Arbeitsbereich und die Details darunter.
 
@@ -51,9 +54,9 @@ Wenn aus einer älteren Installation noch `data/vault.kdbx` vorhanden ist, kanns
 
 Die folgenden Variablen unter `environment` in `compose.yaml` steuern die Cloud-Importe. Hänge für die Redirect-URI in der App-Registrierung `/cloud-callback.html` an die öffentliche KeeCove-Adresse an, zum Beispiel `https://vault.example.org/cloud-callback.html`. Übernimm die Änderungen mit `docker compose up -d`.
 
-- **OneDrive.** Registriere in Microsoft Entra eine **Single-page application** mit delegiertem Microsoft-Graph-Recht `Files.Read`. Setze `CLOUD_ONEDRIVE_CLIENT_ID`. Der Standard `CLOUD_ONEDRIVE_TENANT=common` ist für eine Registrierung mit persönlichen und Organisationskonten gedacht. Verwende für eine mandanteninterne App die passende Mandanten-ID. [Microsoft OAuth](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow)
+- **OneDrive.** Registriere in Microsoft Entra eine **Single-page application** mit delegiertem Microsoft-Graph-Recht `Files.ReadWrite`. Setze `CLOUD_ONEDRIVE_CLIENT_ID`. Der Standard `CLOUD_ONEDRIVE_TENANT=common` ist für eine Registrierung mit persönlichen und Organisationskonten gedacht. Verwende für eine mandanteninterne App die passende Mandanten-ID. Wenn deine App bisher `Files.Read` verwendet, ergänze `Files.ReadWrite`, verbinde OneDrive erneut und bestätige bei Bedarf die zusätzliche Berechtigung. Die bisherige Redirect-URI gilt weiter. [Microsoft OAuth](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow) · [Dateiinhalt in Microsoft Graph ersetzen](https://learn.microsoft.com/en-us/graph/api/driveitem-put-content?view=graph-rest-1.0)
 - **Google Drive.** Aktiviere die Drive API und lege einen OAuth-Client vom Typ **Webanwendung** an. Trage die KeeCove-Adresse als autorisierten JavaScript-Ursprung ein und setze `CLOUD_GOOGLE_CLIENT_ID`. Der Dateibrowser verwendet `drive.readonly` und Googles direkt im Browser dokumentierten Legacy-Tokenfluss. Für eine externe App im Testmodus füge die zugelassenen Testkonten hinzu. Google kann für eine Veröffentlichung eine Prüfung verlangen. [Google Browser-OAuth](https://developers.google.com/identity/protocols/oauth2/javascript-implicit-flow) · [Drive-Berechtigungen](https://developers.google.com/workspace/drive/api/guides/api-specific-auth)
-- **Dropbox.** Registriere eine App mit **Scoped access** und **Full Dropbox**, um vorhandene Ordner auswählen zu können. Aktiviere `files.metadata.read` und `files.content.read`. Setze den öffentlichen App Key als `CLOUD_DROPBOX_CLIENT_ID`. [Dropbox OAuth](https://docs.dropboxapi.com/dropbox-api/docs/oauth)
+- **Dropbox.** Registriere eine App mit **Scoped access** und **Full Dropbox**, um vorhandene Ordner auswählen zu können. Aktiviere `files.metadata.read`, `files.content.read` und `files.content.write`. Setze den öffentlichen App Key als `CLOUD_DROPBOX_CLIENT_ID`. Ergänze bei einer bestehenden App die Schreibberechtigung und verbinde Dropbox erneut. [Dropbox OAuth](https://docs.dropboxapi.com/dropbox-api/docs/oauth) · [Dropbox-Dateien aktualisieren](https://docs.dropboxapi.com/dropbox-api/api-reference/user-endpoints/files/upload)
 
 Die Anmeldung öffnet ein eigenes Fenster beim Anbieter. KeeCove verwendet nur kurzlebige Zugriffstokens im Browser. Dateien anderer Anbieter kannst du über einen lokal synchronisierten Ordner öffnen.
 

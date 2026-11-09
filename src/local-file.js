@@ -1,11 +1,8 @@
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { assertImportFileBytes, MAX_IMPORT_FILE_BYTES } from './import-session.js';
+import { VaultSourceConflictError } from './vault-source.js';
 
-export class LocalFileConflictError extends Error {
-  constructor(message = 'Die KDBX-Datei wurde zwischenzeitlich geändert. Lade sie vor dem Speichern neu.', options) {
-    super(message, options);
-  }
-}
+export class LocalFileConflictError extends VaultSourceConflictError {}
 
 export class LocalFilePermissionError extends Error {
   constructor(mode, options) {
@@ -82,8 +79,8 @@ export async function writeLocalFile(handle, bytes, expectedRevision, { signal, 
     signal?.throwIfAborted();
     await writable.write(bytes);
     // The browser commits its staged file on close; desktop applications use their own locks.
+    await beforeCommit?.();
     await checkRevision();
-    beforeCommit?.();
     await writable.close();
     return revision;
   } catch (error) {
