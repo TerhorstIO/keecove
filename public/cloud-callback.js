@@ -5,7 +5,7 @@ const state = response.get('state');
 if (/^[A-Za-z0-9_-]{43}$/.test(state ?? '')) {
   const channel = new BroadcastChannel(`keevault-auth-${state}`);
   const result = response.has('error') ? {} : tokenFlow
-    ? { accessToken: response.get('access_token'), tokenType: response.get('token_type') }
+    ? { accessToken: response.get('access_token'), tokenType: response.get('token_type'), scope: response.get('scope') }
     : { code: response.get('code') };
   channel.postMessage({ state, ...result });
   channel.close();

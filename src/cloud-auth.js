@@ -21,6 +21,9 @@ function waitForAuthorization(url, state, tokenFlow, signal) {
       if (typeof value !== 'string' || !value || value.length > 4096 ||
           (tokenFlow && data.tokenType?.toLowerCase() !== 'bearer')) {
         finish(reject, new Error('Die Cloud-Anmeldung wurde abgebrochen oder der Zugriff wurde nicht erlaubt.'));
+      } else if (tokenFlow && typeof data.scope === 'string' && !url.searchParams.get('scope').split(/\s+/)
+        .every((required) => data.scope.split(/\s+/).includes(required))) {
+        finish(reject, new Error('Google Drive hat den Schreibzugriff nicht freigegeben. Verbinde das Konto erneut und bestätige den Zugriff.'));
       } else {
         finish(resolve, value);
       }
