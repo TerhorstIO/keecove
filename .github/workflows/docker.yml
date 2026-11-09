@@ -113,10 +113,19 @@ jobs:
             ' <<< "$index")
             docker pull --platform "linux/$arch" "$IMAGE@$manifest"
             docker image tag "$IMAGE@$manifest" "$IMAGE:$IMAGE_TAG"
+            if [[ "$arch" == amd64 ]]; then
+              (
+                container=$(docker create --platform linux/amd64 "$IMAGE@$manifest")
+                trap 'docker rm "$container" >/dev/null' EXIT
+                docker cp "$container:/app/dist/keecove-browser.zip" .
+                docker cp "$container:/app/dist/keecove-firefox.zip" .
+              )
+            fi
             docker image save --platform "linux/$arch" \
               --output "keecove-linux-$arch.tar" "$IMAGE:$IMAGE_TAG"
           done
-          sha256sum keecove-linux-amd64.tar keecove-linux-arm64.tar > SHA256SUMS
+          sha256sum keecove-linux-amd64.tar keecove-linux-arm64.tar \
+            keecove-browser.zip keecove-firefox.zip > SHA256SUMS
       - name: Upload archives to GitHub Releases
         shell: bash
         working-directory: ${{ runner.temp }}
@@ -130,7 +139,7 @@ jobs:
             release_tag="build-$GITHUB_SHA"
             release_flags=(--target "$GITHUB_SHA" --prerelease --latest=false)
           fi
-          assets=(keecove-linux-amd64.tar keecove-linux-arm64.tar SHA256SUMS)
+          assets=(keecove-linux-amd64.tar keecove-linux-arm64.tar keecove-browser.zip keecove-firefox.zip SHA256SUMS)
 
           if is_draft=$(gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null); then
             gh release upload "$release_tag" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
@@ -140,5 +149,5 @@ jobs:
           else
             gh release create "$release_tag" "${assets[@]}" "${release_flags[@]}" \
               --repo "$GITHUB_REPOSITORY" --title "KeeCove $release_tag" \
-              --notes "Offline Docker archives for $IMAGE:$IMAGE_TAG."
+              --notes "Offline Docker archives and browser extension packages for $IMAGE:$IMAGE_TAG."
           fi

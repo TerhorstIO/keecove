@@ -5,6 +5,7 @@ import { deleteFingerprint, EditConflict, entryValues, standardFields } from './
 import { BrowserVaultSession, clearImportSession, readImportSession, readImportSessionMetadata, SessionExpiredError } from './browser-vault.js';
 import { mountCloudPicker } from './cloud-picker.js';
 import { checkImportBytes } from './import-bytes.js';
+import { createExtensionInstaller } from './extension-install.js';
 import { MAX_IMPORT_FILE_BYTES } from './import-session.js';
 import { canPickLocalFile, LocalFilePermissionError, pickLocalFile, readLocalFile, requestLocalFilePermission } from './local-file.js';
 import { icon } from './icons.js';
@@ -12,6 +13,7 @@ import { renderVaultTree } from './vault-tree.js';
 
 const app = document.querySelector('#app');
 const toast = document.querySelector('#toast');
+const extensionInstaller = createExtensionInstaller();
 const idleLimit = 5 * 60 * 1000;
 const labels = { Title: 'Titel', UserName: 'Benutzername', Password: 'Passwort', URL: 'Website', Notes: 'Notizen' };
 const state = {
@@ -27,6 +29,8 @@ let pageEpoch = 0;
 const brand = '<img src="/keevault.svg" alt="" width="40" height="40"><span>KeeCove</span>';
 const iconButton = (action, glyph, label, extra = '') =>
   `<button type="button" class="icon-btn ${extra}" data-action="${action}" aria-label="${label}" title="${label}">${icon(glyph)}</button>`;
+const extensionButton = (classes) =>
+  `<button type="button" class="${classes} extension-install-button" data-action="extension-install" aria-label="${extensionInstaller.label}" title="${extensionInstaller.label}">${icon('puzzle', 17)}<span>${extensionInstaller.label}</span></button>`;
 
 function text(tag, content, className) {
   const element = document.createElement(tag);
@@ -77,7 +81,7 @@ function renderLocked() {
     <main class="lock-screen">
       <header class="lock-header">
         <div class="brand">${brand}</div>
-        <a class="subtle-link" href="/keecove-browser.zip" download>${icon('puzzle', 17)} Browser-Erweiterung</a>
+        ${extensionButton('subtle-link')}
       </header>
       <div class="lock-content">
         <div class="lock-card">
@@ -286,6 +290,7 @@ async function unlock(form) {
 }
 
 function lock(message = '') {
+  extensionInstaller.close();
   state.session?.close();
   Object.assign(state, {
     session: null, busy: false, selection: null, group: '', query: '', draft: null,
@@ -373,7 +378,6 @@ function renderVault() {
           <div id="group-list" class="group-list"></div>
         </nav>
         <div class="sidebar-footer">
-          <a class="nav-link" href="/keecove-browser.zip" aria-label="Browser-Erweiterung herunterladen" download>${icon('puzzle', 17)}<span>Browser-Erweiterung</span></a>
           <button type="button" class="nav-link" data-action="download" aria-label="KDBX exportieren">${icon('download', 17)}<span>KDBX exportieren</span></button>
           <button type="button" class="nav-link" data-action="lock" aria-label="Tresor sperren">${icon('lock', 17)}<span>Tresor sperren</span></button>
         </div>
@@ -384,6 +388,7 @@ function renderVault() {
           <div class="workspace-actions">
             <button type="button" class="sync-pill" data-action="refresh" aria-label="Dateiversion jetzt prüfen"><span class="status-dot"></span><span id="sync-status"></span>${icon('refresh', 14)}</button>
             <button type="button" class="btn primary" data-action="new">${icon('plus', 18)} <span>Neuer Eintrag</span></button>
+            ${extensionButton('btn secondary')}
           </div>
         </header>
         <p id="sync-error" class="sync-error" role="status" hidden></p>
@@ -768,6 +773,10 @@ app.addEventListener('click', (event) => {
   const button = event.target.closest('[data-action]');
   if (!button) return;
   const { action, id } = button.dataset;
+  if (action === 'extension-install') {
+    extensionInstaller.open();
+    return;
+  }
   if (state.busy && action !== 'lock') return;
   if (action.startsWith('mode-')) {
     const mode = action.slice(5);
@@ -894,6 +903,7 @@ for (const event of ['pointerdown', 'keydown', 'input']) {
 }
 window.addEventListener('focus', () => { void refresh({ manual: !state.session }); });
 window.addEventListener('pagehide', () => {
+  extensionInstaller.close();
   pageEpoch++;
   unmountCloudPicker?.();
   if (state.session) lock();

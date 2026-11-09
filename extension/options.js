@@ -1,4 +1,4 @@
-import { hostPattern, vaultAddress } from './config.js';
+import { extensionApi, hostPattern, vaultAddress } from './config.js';
 
 const form = document.querySelector('#settings-form');
 const input = document.querySelector('#vault-url');
@@ -6,7 +6,7 @@ const save = form.querySelector('button');
 const status = document.querySelector('#status');
 
 try {
-  const stored = await chrome.storage.local.get('vaultUrl');
+  const stored = await extensionApi.storage.local.get('vaultUrl');
   input.value = stored.vaultUrl ?? '';
   save.disabled = false;
 } catch {
@@ -26,17 +26,17 @@ form.addEventListener('submit', async (event) => {
   save.disabled = true;
   input.disabled = true;
   try {
-    const granted = await chrome.permissions.request({ origins: [pattern] });
+    const granted = await extensionApi.permissions.request({ origins: [pattern] });
     if (!granted) {
       status.textContent = 'Der Zugriff wurde nicht erteilt.';
       return;
     }
 
-    const stored = await chrome.storage.local.get('vaultUrl');
+    const stored = await extensionApi.storage.local.get('vaultUrl');
     const previous = vaultAddress(stored.vaultUrl);
-    await chrome.storage.local.set({ vaultUrl: vault.href });
+    await extensionApi.storage.local.set({ vaultUrl: vault.href });
     if (previous && hostPattern(previous) !== pattern) {
-      await chrome.permissions.remove({ origins: [hostPattern(previous)] });
+      await extensionApi.permissions.remove({ origins: [hostPattern(previous)] });
     }
     input.value = vault.href;
     status.textContent = 'Adresse gespeichert. Du kannst KeeCove jetzt über das Browser-Symbol öffnen.';

@@ -57,9 +57,24 @@ Die folgenden Variablen unter `environment` in `compose.yaml` steuern die Cloud-
 
 Die Anmeldung öffnet ein eigenes Fenster beim Anbieter. KeeCove verwendet nur kurzlebige Zugriffstokens im Browser. Dateien anderer Anbieter kannst du über einen lokal synchronisierten Ordner öffnen.
 
-## Chrome und Edge
+## Browser-Erweiterung
 
-Lade in KeeCove **Browser-Erweiterung** herunter und entpacke `keecove-browser.zip`. Öffne `chrome://extensions` oder `edge://extensions`, aktiviere den Entwicklermodus und lade den entpackten Ordner. Trage die HTTPS-Adresse deiner KeeCove-Instanz ein. Die Erweiterung füllt nur nach deiner Auswahl und nur für die passende Website. Dazu muss KeeCove in einem Tab entsperrt sein. [Anleitung zur Erweiterung](extension/README.md)
+Öffne in KeeCove die Schaltfläche für deinen Browser. Wenn ein Installationsziel eingerichtet ist, öffnet sie den Store oder in Firefox die signierte XPI. Bestätige die Installation im Browser. Sonst zeigt KeeCove die manuellen Schritte und den passenden Download an. Die ZIP-Pakete stehen auch in den [GitHub-Releases](https://github.com/TerhorstIO/keecove/releases) zur Verfügung.
+
+- **Chrome und Edge.** Entpacke `keecove-browser.zip`. Öffne `chrome://extensions` oder `edge://extensions`, aktiviere den Entwicklermodus und lade den entpackten Ordner. [Chrome](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked) · [Edge](https://learn.microsoft.com/de-de/microsoft-edge/extensions/getting-started/extension-sideloading)
+- **Firefox ab Version 153.** Öffne zum Testen `about:debugging`, wähle **Dieser Firefox** und **Temporäres Add-on laden**. Wähle `keecove-firefox.zip`. Die temporäre Installation endet mit dem nächsten Firefox-Neustart. Für eine dauerhafte Installation muss Mozilla das Paket signieren. [Temporäre Installation](https://extensionworkshop.com/documentation/develop/temporary-installation-in-firefox/) · [Mozilla-Signierung](https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/)
+
+Trage danach die HTTPS-Adresse deiner KeeCove-Instanz in der Erweiterung ein. KeeCove muss in einem Tab entsperrt sein. Die Erweiterung füllt die Zugangsdaten nach deiner Auswahl und nur auf der passenden Website ein. [Anleitung zur Erweiterung](extension/README.md)
+
+### Installationsziele einrichten
+
+Setze unter `environment` in `compose.yaml` die URLs für deine veröffentlichten Erweiterungen.
+
+- `EXTENSION_CHROME_URL` verweist auf den Eintrag im Chrome Web Store unter `https://chromewebstore.google.com/detail/…`.
+- `EXTENSION_EDGE_URL` verweist auf den Eintrag bei Microsoft Edge Add-ons unter `https://microsoftedge.microsoft.com/addons/detail/…`.
+- `EXTENSION_FIREFOX_URL` verweist auf den Eintrag bei Mozilla Add-ons oder auf eine öffentlich erreichbare HTTPS-Adresse zu einer von Mozilla signierten `.xpi`. Der Downloadserver muss die XPI als `application/x-xpinstall` ausliefern. [Mozilla-Selbstverteilung](https://extensionworkshop.com/documentation/publish/self-distribution/)
+
+Übernimm die Änderungen mit `docker compose up -d`.
 
 ## Lokale Entwicklung
 

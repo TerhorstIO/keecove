@@ -1,4 +1,4 @@
-import { hostPattern, secureWebUrl, vaultAddress } from './config.js';
+import { extensionApi, hostPattern, secureWebUrl, vaultAddress } from './config.js';
 import { fillLogin, probeTarget, requestVault } from './injections.js';
 
 const status = document.querySelector('#status');
@@ -8,24 +8,24 @@ const openVault = document.querySelector('#open-vault');
 
 document.querySelector('#settings').addEventListener('click', async () => {
   try {
-    await chrome.runtime.openOptionsPage();
+    await extensionApi.runtime.openOptionsPage();
   } catch {
     status.textContent = 'Die Einstellungen konnten nicht geöffnet werden.';
   }
 });
 
 async function getActiveTab() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const [tab] = await extensionApi.tabs.query({ active: true, currentWindow: true });
   return tab;
 }
 
 async function findVaultTabs(vault, incognito) {
-  const tabs = await chrome.tabs.query({ url: hostPattern(vault) });
+  const tabs = await extensionApi.tabs.query({ url: hostPattern(vault) });
   return tabs.filter((tab) => tab.url === vault.href && tab.incognito === incognito && Number.isInteger(tab.id));
 }
 
 async function callVault(target, vault, request) {
-  const [response] = await chrome.scripting.executeScript({
+  const [response] = await extensionApi.scripting.executeScript({
     target,
     world: 'MAIN',
     func: requestVault,
@@ -60,7 +60,7 @@ async function fillAccount(vault, vaultTarget, target, id) {
       return;
     }
 
-    const [filled] = await chrome.scripting.executeScript({
+    const [filled] = await extensionApi.scripting.executeScript({
       target: { tabId: target.tabId, documentIds: [target.documentId] },
       world: 'ISOLATED',
       func: fillLogin,
@@ -99,7 +99,7 @@ function renderAccounts(entries, vault, vaultTarget, target) {
 }
 
 async function load() {
-  const settings = await chrome.storage.local.get('vaultUrl');
+  const settings = await extensionApi.storage.local.get('vaultUrl');
   const vault = vaultAddress(settings.vaultUrl);
   if (!vault) {
     status.textContent = 'KeeCove-Adresse fehlt.';
@@ -113,17 +113,17 @@ async function load() {
     try {
       const [existing] = await findVaultTabs(vault, incognito);
       if (existing) {
-        await chrome.tabs.update(existing.id, { active: true });
-        await chrome.windows.update(existing.windowId, { focused: true });
+        await extensionApi.tabs.update(existing.id, { active: true });
+        await extensionApi.windows.update(existing.windowId, { focused: true });
       } else {
-        await chrome.tabs.create({ url: vault.href });
+        await extensionApi.tabs.create({ url: vault.href });
       }
     } catch {
       status.textContent = 'Der Vault konnte nicht geöffnet werden.';
     }
   });
 
-  if (!await chrome.permissions.contains({ origins: [hostPattern(vault)] })) {
+  if (!await extensionApi.permissions.contains({ origins: [hostPattern(vault)] })) {
     status.textContent = 'Erteile den Host-Zugriff erneut über die Einstellungen.';
     return;
   }
@@ -135,7 +135,7 @@ async function load() {
 
   targetLabel.textContent = url.origin;
   targetLabel.hidden = false;
-  const [probe] = await chrome.scripting.executeScript({
+  const [probe] = await extensionApi.scripting.executeScript({
     target: { tabId: tab.id },
     func: probeTarget,
     args: [url.origin],

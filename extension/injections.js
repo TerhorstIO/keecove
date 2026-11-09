@@ -1,4 +1,4 @@
-// Chromium serialisiert diese Funktionen und führt sie ohne Modulkontext aus.
+// Der Browser serialisiert diese Funktionen und führt sie ohne Modulkontext aus.
 export function requestVault(expectedUrl, request) {
   if (window.top !== window || !window.isSecureContext || location.href !== expectedUrl) return null;
   if (typeof window.keevaultBrowser?.request !== 'function') return { status: 'unavailable' };

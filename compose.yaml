@@ -12,6 +12,9 @@ services:
       CLOUD_ONEDRIVE_TENANT: common
       CLOUD_GOOGLE_CLIENT_ID: ""
       CLOUD_DROPBOX_CLIENT_ID: ""
+      EXTENSION_CHROME_URL: ""
+      EXTENSION_EDGE_URL: ""
+      EXTENSION_FIREFOX_URL: ""
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     read_only: true

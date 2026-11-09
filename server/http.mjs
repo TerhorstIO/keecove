@@ -10,7 +10,12 @@ const mimeTypes = {
     '.ico': 'image/x-icon', '.js': 'text/javascript; charset=utf-8',
     '.json': 'application/json; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
     '.png': 'image/png', '.svg': 'image/svg+xml', '.wasm': 'application/wasm',
-    '.webp': 'image/webp', '.woff2': 'font/woff2', '.zip': 'application/zip',
+    '.webp': 'image/webp', '.woff2': 'font/woff2', '.xpi': 'application/x-xpinstall', '.zip': 'application/zip',
+};
+const extensionStores = {
+    chrome: ['https://chromewebstore.google.com', /^\/detail\/(?:[^/\\]+\/)?[a-p]{32}\/?$/],
+    edge: ['https://microsoftedge.microsoft.com', /^\/addons\/detail\/(?:[^/\\]+\/)?[a-p]{32}\/?$/],
+    firefox: ['https://addons.mozilla.org', /^\/(?:[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*\/)?firefox\/addon\/[A-Za-z0-9_-]+\/?$/],
 };
 const loopback = ['localhost', '127.0.0.1', '[::1]'];
 const providerConnections = [
@@ -56,6 +61,20 @@ function readOrigin(value) {
     return url;
 }
 
+function readExtensionUrl(browser, value) {
+    const url = value && URL.parse(value.trim());
+    if (!url || url.protocol !== 'https:' || url.username || url.password) return;
+    if (browser === 'firefox' && /\.xpi$/i.test(url.pathname)) return url.href;
+
+    const [origin, detailPath] = extensionStores[browser];
+    if (url.origin !== origin) return;
+    try {
+        if (detailPath.test(decodeURIComponent(url.pathname))) return url.href;
+    } catch {
+        // An invalid percent-encoded path is not a store listing.
+    }
+}
+
 export function readConfig(env = process.env) {
     const certPath = env.TLS_CERT_PATH;
     const keyPath = env.TLS_KEY_PATH;
@@ -73,12 +92,19 @@ export function readConfig(env = process.env) {
     if (env.CLOUD_GOOGLE_CLIENT_ID?.trim()) cloud.google = { clientId: env.CLOUD_GOOGLE_CLIENT_ID.trim() };
     if (env.CLOUD_DROPBOX_CLIENT_ID?.trim()) cloud.dropbox = { clientId: env.CLOUD_DROPBOX_CLIENT_ID.trim() };
 
+    const extensions = {};
+    for (const browser of Object.keys(extensionStores)) {
+        const url = readExtensionUrl(browser, env[`EXTENSION_${browser.toUpperCase()}_URL`]);
+        if (url) extensions[browser] = url;
+    }
+
     return {
         port: readPort(env.PORT),
         listenHost: env.LISTEN_HOST ?? '127.0.0.1',
         origin: readOrigin(env.PUBLIC_ORIGIN),
         tls: certPath ? { certPath, keyPath } : null,
         cloud,
+        extensions,
         staticRoot: fileURLToPath(new URL('../dist/', import.meta.url)),
     };
 }
@@ -185,9 +211,10 @@ export async function createVaultServer(config = readConfig()) {
 
         const origin = expectedOrigin(request.headers.host?.toLowerCase(), server.address()?.port, config.origin, Boolean(config.tls));
         if (!origin) throw new HttpError(421, 'Host is not configured for KeeCove.');
-        if (pathname === '/cloud-config.json') {
+        if (pathname === '/cloud-config.json' || pathname === '/extension-config.json') {
             checkRequestOrigin(request, origin);
-            const body = JSON.stringify(config.cloud ?? {});
+            const data = pathname === '/cloud-config.json' ? config.cloud : config.extensions;
+            const body = JSON.stringify(data ?? {});
             response.writeHead(200, {
                 'Content-Type': 'application/json; charset=utf-8',
                 'Content-Length': Buffer.byteLength(body),

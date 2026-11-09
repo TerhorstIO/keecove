@@ -20,6 +20,7 @@ async function setup(context, env = {}) {
     await Promise.all([
         writeFile(join(staticRoot, 'index.html'), page),
         writeFile(join(staticRoot, 'keecove-browser.zip'), extensionArchive),
+        writeFile(join(staticRoot, 'keecove-firefox.xpi'), extensionArchive),
         writeFile(join(staticRoot, worker.slice(1)), 'self.onmessage = () => {};'),
         writeFile(join(staticRoot, 'assets', 'index-fixture.js'), 'export {};'),
         writeFile(join(staticRoot, 'unpublished.kdbx'), 'fixture bytes inside the static root'),
@@ -66,6 +67,10 @@ test('the server only serves static assets and health, without any vault file ro
         assert.equal(archive.headers.get('content-type'), 'application/zip');
         assert.equal(await archive.text(), extensionArchive);
     }
+    const xpi = await fetch(url('/keecove-firefox.xpi'));
+    assert.equal(xpi.status, 200);
+    assert.equal(xpi.headers.get('content-type'), 'application/x-xpinstall');
+    assert.equal(await xpi.text(), extensionArchive);
     assert.equal((await fetch(url('/healthz'))).status, 204);
     for (const path of ['/api/vault', '/api/events', '/data/vault.kdbx', '/unpublished.kdbx', '/%2e%2e%2foriginal.kdbx']) {
         assert.equal((await fetch(url(path))).status, 404);
@@ -99,6 +104,47 @@ test('the runtime cloud config exposes only configured public application identi
     assert.equal(readConfig({ CLOUD_ONEDRIVE_CLIENT_ID: 'id', CLOUD_ONEDRIVE_TENANT: 'organizations' }).cloud.onedrive.tenant, 'organizations');
 });
 
+test('the extension config serves validated store and signed XPI URLs without caching', async (context) => {
+    const chrome = 'https://chromewebstore.google.com/detail/keecove/abcdefghijklmnopabcdefghijklmnop?hl=de';
+    const edge = 'https://microsoftedge.microsoft.com/addons/detail/keecove/ponmlkjihgfedcbaponmlkjihgfedcba';
+    const firefox = 'https://addons.mozilla.org/de/firefox/addon/keecove/';
+    const { url } = await setup(context, {
+        EXTENSION_CHROME_URL: '  ' + chrome + '  ',
+        EXTENSION_EDGE_URL: edge,
+        EXTENSION_FIREFOX_URL: firefox,
+    });
+
+    const endpoint = url('/extension-config.json');
+    const response = await fetch(endpoint);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'application/json; charset=utf-8');
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await response.json(), { chrome, edge, firefox });
+    const head = await fetch(endpoint, { method: 'HEAD' });
+    assert.equal(head.status, 200);
+    assert.equal(head.headers.get('content-length'), response.headers.get('content-length'));
+    assert.equal(await head.text(), '');
+
+    const signedXpi = 'https://vault.example:8443/keecove.xpi';
+    assert.deepEqual(readConfig({ EXTENSION_FIREFOX_URL: signedXpi }).extensions, { firefox: signedXpi });
+    assert.deepEqual(readConfig({ EXTENSION_CHROME_URL: '', EXTENSION_EDGE_URL: '   ' }).extensions, {});
+    assert.deepEqual(readConfig({
+        EXTENSION_CHROME_URL: chrome.replace('chromewebstore.google.com', 'chromewebstore.google.com.invalid'),
+        EXTENSION_EDGE_URL: edge.replace('/detail/', '/search/'),
+        EXTENSION_FIREFOX_URL: signedXpi.replace('https://', 'http://'),
+    }).extensions, {});
+    assert.deepEqual(readConfig({
+        EXTENSION_CHROME_URL: chrome.replace('/keecove/', '/other%2Fkeecove/'),
+        EXTENSION_EDGE_URL: edge.replace('ponmlkjihgfedcbaponmlkjihgfedcba', 'not-an-extension-id'),
+        EXTENSION_FIREFOX_URL: signedXpi.replace('https://', 'https://user:password@'),
+    }).extensions, {});
+    assert.deepEqual(readConfig({
+        EXTENSION_CHROME_URL: chrome.replace('https://', 'javascript:'),
+        EXTENSION_EDGE_URL: edge.replace('https://', 'https://user@'),
+        EXTENSION_FIREFOX_URL: firefox.replace('/addon/', '/search/'),
+    }).extensions, {});
+});
+
 test('only the specific download worker can make requests to arbitrary HTTPS URLs', async (context) => {
     const { url } = await setup(context);
     const main = await fetch(url());
@@ -129,10 +175,13 @@ test('the HTTP backend honors an HTTPS public origin and rejects forged hosts an
         Host: 'attacker.example', 'X-Forwarded-Host': publicHost,
     })).statusCode, 421);
 
-    const configUrl = url('/cloud-config.json');
-    const config = await getWithHeaders(configUrl, { Host: publicHost, Origin: publicOrigin, 'Sec-Fetch-Site': 'same-origin' });
-    assert.equal(config.statusCode, 200);
-    assert.equal(config.headers['www-authenticate'], undefined);
-    assert.equal((await getWithHeaders(configUrl, { Host: publicHost, Origin: 'https://attacker.example' })).statusCode, 403);
-    assert.equal((await getWithHeaders(configUrl, { Host: publicHost, 'Sec-Fetch-Site': 'same-site' })).statusCode, 403);
+    for (const configPath of ['/cloud-config.json', '/extension-config.json']) {
+        const configUrl = url(configPath);
+        const config = await getWithHeaders(configUrl, { Host: publicHost, Origin: publicOrigin, 'Sec-Fetch-Site': 'same-origin' });
+        assert.equal(config.statusCode, 200);
+        assert.equal(config.headers['www-authenticate'], undefined);
+        assert.equal((await getWithHeaders(configUrl, { Host: 'attacker.example', Origin: publicOrigin })).statusCode, 421);
+        assert.equal((await getWithHeaders(configUrl, { Host: publicHost, Origin: 'https://attacker.example' })).statusCode, 403);
+        assert.equal((await getWithHeaders(configUrl, { Host: publicHost, 'Sec-Fetch-Site': 'same-site' })).statusCode, 403);
+    }
 });

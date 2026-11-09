@@ -14,5 +14,11 @@ async function collect(directory, prefix = '') {
 }
 
 await collect(root);
-if (!files['manifest.json']) throw new Error('Extension manifest is missing.');
-await writeFile(new URL('../dist/keecove-browser.zip', import.meta.url), zipSync(files));
+const firefoxManifest = files['manifest.firefox.json'];
+if (!files['manifest.json'] || !firefoxManifest) throw new Error('An extension manifest is missing.');
+delete files['manifest.firefox.json'];
+
+await Promise.all([
+  writeFile(new URL('../dist/keecove-browser.zip', import.meta.url), zipSync(files)),
+  writeFile(new URL('../dist/keecove-firefox.zip', import.meta.url), zipSync({ ...files, 'manifest.json': firefoxManifest }))
+]);

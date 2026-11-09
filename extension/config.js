@@ -1,3 +1,5 @@
+export const extensionApi = globalThis.browser ?? globalThis.chrome;
+
 export function secureWebUrl(value) {
   try {
     const url = new URL(value);
@@ -16,6 +18,6 @@ export function vaultAddress(value) {
 }
 
 export function hostPattern(url) {
-  // Chromium host permissions omit the port. Tab and script checks use the full origin.
+  // Host permissions omit the port. Tab and script checks use the full origin.
   return `${url.protocol}//${url.hostname}/*`;
 }

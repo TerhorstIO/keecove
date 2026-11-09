@@ -1,10 +1,28 @@
-# KeeCove für Chrome und Edge
+# KeeCove für Chrome, Edge und Firefox
 
-1. Öffne `chrome://extensions` in Chrome oder `edge://extensions` in Edge.
-2. Aktiviere den Entwicklermodus und wähle **Entpackte Erweiterung laden**. Wähle den Ordner `extension`, der die `manifest.json` enthält.
-3. Öffne über das KeeCove-Symbol die **Einstellungen**. Trage die Startadresse deiner KeeCove-Instanz ein, etwa `https://vault.example.com`. Für eine lokale Instanz kannst du HTTP über `localhost` oder `127.0.0.1` verwenden. Speichere die Adresse und erlaube den Zugriff auf den KeeCove-Host.
+Öffne die Erweiterungsansicht deiner KeeCove-Instanz. Wenn dein Betreiber einen Store-Eintrag hinterlegt hat, führt der Installationslink zur passenden Browser-Erweiterung. Ansonsten findest du dort das ZIP-Paket für deinen Browser.
+
+## Manuelle Installation
+
+### Chrome und Edge
+
+1. Lade `keecove-browser.zip` herunter und entpacke es.
+2. Öffne `chrome://extensions` in Chrome oder `edge://extensions` in Edge.
+3. Aktiviere den Entwicklermodus und wähle **Entpackte Erweiterung laden**. Wähle den entpackten Ordner mit der `manifest.json`.
 
 [Installation in Chrome](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked) · [Installation in Edge](https://learn.microsoft.com/de-de/microsoft-edge/extensions/getting-started/extension-sideloading)
+
+### Firefox ab Version 153
+
+1. Lade `keecove-firefox.zip` herunter.
+2. Öffne `about:debugging#/runtime/this-firefox` und wähle **Temporäres Add-on laden**.
+3. Wähle das ZIP-Paket aus. Firefox lädt es bis zum nächsten Neustart. Für eine dauerhafte Installation brauchst du ein von Mozilla signiertes Add-on.
+
+[Temporäre Installation in Firefox](https://extensionworkshop.com/documentation/develop/temporary-installation-in-firefox/) · [Signierung und Veröffentlichung](https://extensionworkshop.com/documentation/publish/)
+
+## Erweiterung einrichten
+
+Öffne über das KeeCove-Symbol die **Einstellungen**. Trage die Startadresse deiner eigenen vertrauenswürdigen KeeCove-Instanz ein, etwa `https://vault.example.com`. Für eine lokale Instanz kannst du HTTP über `localhost` oder `127.0.0.1` verwenden. Speichere die Adresse und erlaube den Zugriff auf den KeeCove-Host.
 
 ## Anmeldedaten ausfüllen
 
@@ -12,4 +30,6 @@
 
 Die Erweiterung unterstützt eindeutige, sichtbare Passwortfelder im Hauptdokument, POST-Formulare mit einem Ziel auf derselben Origin und Felder ohne HTML-Formular. Für andere Formulare kannst du die Zugangsdaten aus dem Vault übernehmen.
 
-Die Erweiterung speichert die KeeCove-Adresse als Einstellung. Für jeden Klick auf einen Eintrag fragt sie das Passwort beim entsperrten KeeCove-Tab ab und übergibt es im Browser an das ausgewählte Anmeldeformular. Verwende dafür die Adresse deiner eigenen vertrauenswürdigen KeeCove-Instanz.
+## Datenschutz
+
+Die Erweiterung speichert die KeeCove-Adresse lokal als Einstellung. Sie verwendet den entsperrten KeeCove-Tab im selben Browserprofil. Erst wenn du einen Eintrag auswählst, fragt die Erweiterung dessen Passwort ab und übergibt es innerhalb des Browsers an das passende Anmeldeformular. Der Vault, das Masterpasswort und die ausgefüllten Zugangsdaten bleiben außerhalb des Erweiterungsspeichers.
