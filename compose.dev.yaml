@@ -2,3 +2,25 @@ services:
   keevault:
     build: .
     image: keevault:local
+    user: "1000:1000"
+    environment:
+      TLS_CERT_PATH: /tls/localhost.crt
+      TLS_KEY_PATH: /tls/localhost.key
+    volumes:
+      - type: bind
+        source: "${LOCALAPPDATA:-${HOME}}/.keevault/tls"
+        target: /tls
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >
+          const ca = require('node:fs').readFileSync(process.env.TLS_CERT_PATH);
+          require('node:https').get({ hostname: '127.0.0.1', port: process.env.PORT, path: '/healthz', ca }, response => {
+            response.resume();
+            process.exitCode = response.statusCode === 204 ? 0 : 1;
+          }).on('error', () => { process.exitCode = 1; });

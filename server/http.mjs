@@ -1,4 +1,3 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { createServer as createHttpServer } from 'node:http';
@@ -57,16 +56,7 @@ function readOrigin(value) {
     return url;
 }
 
-function authDigest(value) {
-    return createHash('sha256').update(value).digest();
-}
-
 export function readConfig(env = process.env) {
-    const username = env.VAULT_HTTP_USER;
-    const password = env.VAULT_HTTP_PASSWORD;
-    if ((username || password) && (!username || !password || username.includes(':'))) {
-        throw new Error('Set both VAULT_HTTP_USER and VAULT_HTTP_PASSWORD. The username cannot contain a colon.');
-    }
     const certPath = env.TLS_CERT_PATH;
     const keyPath = env.TLS_KEY_PATH;
     if (Boolean(certPath) !== Boolean(keyPath)) {
@@ -88,7 +78,6 @@ export function readConfig(env = process.env) {
         listenHost: env.LISTEN_HOST ?? '127.0.0.1',
         origin: readOrigin(env.PUBLIC_ORIGIN),
         tls: certPath ? { certPath, keyPath } : null,
-        auth: username ? authDigest(username + ':' + password) : null,
         cloud,
         staticRoot: fileURLToPath(new URL('../dist/', import.meta.url)),
     };
@@ -103,12 +92,6 @@ function expectedOrigin(host, boundPort, configured, secure) {
         if (authority === host) return scheme + '://' + authority;
     }
     return null;
-}
-
-function allowedUser(authorization, expectedDigest) {
-    if (!expectedDigest) return true;
-    if (!authorization || !/^Basic [A-Za-z0-9+/]+=*$/i.test(authorization)) return false;
-    return timingSafeEqual(authDigest(Buffer.from(authorization.slice(6), 'base64')), expectedDigest);
 }
 
 function checkRequestOrigin(request, origin) {
@@ -202,10 +185,6 @@ export async function createVaultServer(config = readConfig()) {
 
         const origin = expectedOrigin(request.headers.host?.toLowerCase(), server.address()?.port, config.origin, Boolean(config.tls));
         if (!origin) throw new HttpError(421, 'Host is not configured for KeeCove.');
-        if (!allowedUser(request.headers.authorization, config.auth)) {
-            response.setHeader('WWW-Authenticate', 'Basic realm="Keevault", charset="UTF-8"');
-            throw new HttpError(401, 'Authentication required.');
-        }
         if (pathname === '/cloud-config.json') {
             checkRequestOrigin(request, origin);
             const body = JSON.stringify(config.cloud ?? {});

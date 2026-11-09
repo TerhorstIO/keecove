@@ -37,11 +37,12 @@ async function setup(context, env = {}) {
     return { url: (path = '/') => origin + path, fixtureVault, vaultBytes };
 }
 
-function statusWithHost(url, host) {
+function getWithHeaders(url, headers) {
     return new Promise((resolve, reject) => {
-        get(url, { headers: { Host: host } }, (response) => {
+        get(url, { headers }, (response) => {
+            response.on('end', () => resolve(response));
+            response.on('error', reject);
             response.resume();
-            resolve(response.statusCode);
         }).on('error', reject);
     });
 }
@@ -115,18 +116,23 @@ test('only the specific download worker can make requests to arbitrary HTTPS URL
     assert.equal((await fetch(url('/assets/import-download.worker-missing.js'))).headers.get('content-security-policy'), mainPolicy);
 });
 
-test('Host and origin restrictions and optional Basic authentication still apply', async (context) => {
-    const { url } = await setup(context, { VAULT_HTTP_USER: 'reader', VAULT_HTTP_PASSWORD: 'http password' });
-    assert.equal(await statusWithHost(url(), 'attacker.example'), 421);
-    const response = await fetch(url());
-    assert.equal(response.status, 401);
-    assert.match(response.headers.get('www-authenticate'), /^Basic /);
-    assert.equal((await fetch(url('/cloud-config.json'))).status, 401);
+test('the HTTP backend honors an HTTPS public origin and rejects forged hosts and origins', async (context) => {
+    const publicOrigin = 'https://vault.example:8443';
+    const publicHost = new URL(publicOrigin).host;
+    const { url } = await setup(context, { PUBLIC_ORIGIN: publicOrigin });
+
     assert.equal((await fetch(url('/healthz'))).status, 204);
-    const authorization = 'Basic ' + Buffer.from('reader:http password').toString('base64');
-    assert.equal((await fetch(url(), { headers: { authorization } })).status, 200);
-    assert.equal((await fetch(url('/cloud-config.json'), { headers: { authorization, Origin: 'https://attacker.example' } })).status, 403);
-    assert.equal((await fetch(url('/cloud-config.json'), { headers: { authorization, 'Sec-Fetch-Site': 'same-site' } })).status, 403);
-    const config = await fetch(url('/cloud-config.json'), { headers: { authorization } });
-    assert.deepEqual(await config.json(), {});
+    const index = await getWithHeaders(url(), { Host: publicHost });
+    assert.equal(index.statusCode, 200);
+    assert.equal(index.headers['www-authenticate'], undefined);
+    assert.equal((await getWithHeaders(url(), {
+        Host: 'attacker.example', 'X-Forwarded-Host': publicHost,
+    })).statusCode, 421);
+
+    const configUrl = url('/cloud-config.json');
+    const config = await getWithHeaders(configUrl, { Host: publicHost, Origin: publicOrigin, 'Sec-Fetch-Site': 'same-origin' });
+    assert.equal(config.statusCode, 200);
+    assert.equal(config.headers['www-authenticate'], undefined);
+    assert.equal((await getWithHeaders(configUrl, { Host: publicHost, Origin: 'https://attacker.example' })).statusCode, 403);
+    assert.equal((await getWithHeaders(configUrl, { Host: publicHost, 'Sec-Fetch-Site': 'same-site' })).statusCode, 403);
 });

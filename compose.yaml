@@ -3,27 +3,15 @@ services:
     image: ghcr.io/terhorstio/keevault:latest
     init: true
     restart: unless-stopped
-    user: "1000:1000"
     ports:
       - "127.0.0.1:8080:8080"
     environment:
       PORT: "8080"
-      TLS_CERT_PATH: /tls/localhost.crt
-      TLS_KEY_PATH: /tls/localhost.key
       PUBLIC_ORIGIN: ""
-      VAULT_HTTP_USER: ""
-      VAULT_HTTP_PASSWORD: ""
       CLOUD_ONEDRIVE_CLIENT_ID: ""
       CLOUD_ONEDRIVE_TENANT: common
       CLOUD_GOOGLE_CLIENT_ID: ""
       CLOUD_DROPBOX_CLIENT_ID: ""
-    volumes:
-      - type: bind
-        source: "${LOCALAPPDATA:-${HOME}}/.keevault/tls"
-        target: /tls
-        read_only: true
-        bind:
-          create_host_path: false
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     read_only: true
@@ -33,8 +21,7 @@ services:
         - node
         - -e
         - >
-          const ca = require('node:fs').readFileSync(process.env.TLS_CERT_PATH);
-          require('node:https').get({ hostname: '127.0.0.1', port: process.env.PORT, path: '/healthz', ca }, response => {
+          require('node:http').get({ hostname: '127.0.0.1', port: process.env.PORT, path: '/healthz' }, response => {
             response.resume();
             process.exitCode = response.statusCode === 204 ? 0 : 1;
           }).on('error', () => { process.exitCode = 1; });
